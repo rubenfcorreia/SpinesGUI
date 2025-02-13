@@ -4,17 +4,16 @@ Spines GUI
 PyQt5 GUI for selecting, labeling, and extracting ROIs from Suite2p output.
 
 Features:
-  • Zoom in/out (100% to 250%) with the mouse wheel and panning via left–click drag.
-  • ROI drawing, editing, and deletion via a right–click menu.
+  • Zoom in/out up to 350% using the mouse wheel and pan with left-click drag.
+  • ROI drawing, editing, and deletion with a right–click menu.
   • ROIs.npy is stored in a "SpinesGUI" subfolder within the selected root folder.
   • "Extract ROIs" button:
-       1. Copies ops.npy, data.bin, and data_chan2.bin (if present) from each original plane folder 
+       1. Copies ops.npy, data.bin, and (if available) data_chan2.bin from each original plane folder
           (in the root) to the corresponding plane folder in the SpinesGUI subfolder.
-          The copied ops.npy is used for extraction.
-       2. Computes ROI masks (stat0) and then ROI statistics (stat1) using a patched roi_stats.
-       3. Loads the copied binary files using BinaryFile (constructed with Ly, Lx, filename, n_frames, and dtype).
-       4. Calls extraction_wrapper to extract ROI signals (F, Fneu, etc.).
-       5. Performs spike deconvolution:
+       2. Computes ROI masks (stat0) and ROI statistics (stat1) using a patched roi_stats.
+       3. Loads the copied binary files using BinaryFile.
+       4. Calls extraction_wrapper to extract ROI signals.
+       5. Performs spike deconvolution as follows:
              dF = F.copy() - ops["neucoeff"] * Fneu  
              dF = preprocess(F=dF, baseline=ops["baseline"],
                              win_baseline=ops["win_baseline"],
@@ -22,13 +21,15 @@ Features:
                              fs=ops["fs"],
                              prctile_baseline=ops["prctile_baseline"])
              spks = oasis(F=dF, batch_size=ops["batch_size"], tau=ops["tau"], fs=ops["fs"])
-          and saves the output to spks.npy.
-       6. Creates an iscell.npy file as a 2D array (each row is [1, 1] for each ROI on that plane).
-       7. Displays a conversion table (ROIs_conversion) in a dialog.
+          and saves the result to spks.npy.
+       6. Creates iscell.npy as a 2D array where each ROI is marked [1, 1].
+       7. Builds ROIs_conversion.npy by taking the conversion info ([plane, index_in_plane])
+          and also adding a "conversion index" (a sequential integer based on the order across planes).
+       8. Finally, displays a conversion table dialog.
   • A ROIs table is also available.
   
 Requirements:
-  - PyQt5, numpy, matplotlib, suite2p (with suite2p.io.binary, suite2p.detection, suite2p.extraction,
+  - PyQt5, numpy, matplotlib, suite2p (including suite2p.io.binary, suite2p.detection, suite2p.extraction,
     and suite2p.extraction.dcnv)
 """
 
@@ -317,12 +318,13 @@ class CustomGraphicsView(QGraphicsView):
         delta = event.angleDelta().y() / 120
         factor = 1.1 ** delta
         new_scale = self.current_scale * factor
+        # Allow zooming up to 350% (scale factor 3.5)
         if new_scale < 1.0:
             factor = 1.0 / self.current_scale
             self.current_scale = 1.0
-        elif new_scale > 2.5:
-            factor = 2.5 / self.current_scale
-            self.current_scale = 2.5
+        elif new_scale > 3.5:
+            factor = 3.5 / self.current_scale
+            self.current_scale = 3.5
         else:
             self.current_scale = new_scale
         self.scale(factor, factor)
@@ -353,8 +355,9 @@ class CustomGraphicsView(QGraphicsView):
                     self.parent_window.tracing_polygon_item.setPen(QPen(Qt.magenta, 2, Qt.DashLine))
                     self.scene().addItem(self.parent_window.tracing_polygon_item)
                     r = 3
+                    # Highlight the first vertex in a different color (red)
                     marker = QGraphicsEllipseItem(QRectF(scene_pos.x()-r, scene_pos.y()-r, 2*r, 2*r))
-                    marker.setBrush(QBrush(Qt.yellow))
+                    marker.setBrush(QBrush(QColor("red")))
                     marker.setPen(QPen(Qt.black))
                     marker.setZValue(4)
                     self.parent_window.tracing_markers = [marker]
@@ -517,9 +520,10 @@ class ConversionTableDialog(QDialog):
     def init_ui(self):
         layout = QVBoxLayout()
         self.table = QTableWidget()
-        self.table.setColumnCount(8)
+        # Added new column for conversion index.
+        self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels(["ROI #", "ROI Type", "Cell ID", "Parent Dendrite ID",
-                                               "Dendritic Spine ID", "Plane", "ROI Coordinates", "Conversion"])
+                                               "Dendritic Spine ID", "Plane", "ROI Coordinates", "Conversion", "Conversion Index"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.populate_table()
         layout.addWidget(self.table)
@@ -537,6 +541,7 @@ class ConversionTableDialog(QDialog):
             else:
                 roi_coords_str = str(roi_coords)
             conversion = info.get("conversion", ["N/A", "N/A"])
+            conv_index = info.get("conversion index", "N/A")
             items = [
                 QTableWidgetItem(str(roi_id)),
                 QTableWidgetItem(typ_str),
@@ -545,7 +550,8 @@ class ConversionTableDialog(QDialog):
                 QTableWidgetItem(str(spineID)),
                 QTableWidgetItem(str(info["plane"])),
                 QTableWidgetItem(roi_coords_str),
-                QTableWidgetItem(str(conversion))
+                QTableWidgetItem(str(conversion)),
+                QTableWidgetItem(str(conv_index))
             ]
             for col, item in enumerate(items):
                 self.table.setItem(row, col, item)
@@ -896,7 +902,7 @@ class MainWindow(QMainWindow):
                                 "Click within the valid ROI area.\n"
                                 "For rectangle, click two opposite corners.\n"
                                 "For polygon, a regular polygon is inscribed.\n"
-                                "For tracing, click to add vertices. The first vertex is highlighted with radius 3; clicking near it (within 10 pixels) will prompt to finish tracing.")
+                                "For tracing, click to add vertices. The first vertex is highlighted in red.")
         self.view.drawing_roi = True
         self.view.setDragMode(QGraphicsView.NoDrag)
 
@@ -956,10 +962,14 @@ class MainWindow(QMainWindow):
             for marker in self.tracing_markers:
                 self.graphics_scene.removeItem(marker)
         self.tracing_markers = []
-        for pt in self.tracing_vertices:
+        for i, pt in enumerate(self.tracing_vertices):
             r = 3
             marker = QGraphicsEllipseItem(QRectF(pt.x()-r, pt.y()-r, 2*r, 2*r))
-            marker.setBrush(QBrush(Qt.yellow))
+            # Highlight the first vertex in red; others in yellow.
+            if i == 0:
+                marker.setBrush(QBrush(QColor("red")))
+            else:
+                marker.setBrush(QBrush(Qt.yellow))
             marker.setPen(QPen(Qt.black))
             marker.setZValue(4)
             self.tracing_markers.append(marker)
@@ -1133,10 +1143,18 @@ class MainWindow(QMainWindow):
             p = roi["plane"]
             plane_groups.setdefault(p, []).append((key, roi))
         for plane, items in plane_groups.items():
+            # Sort items within the plane by ROI key.
             items_sorted = sorted(items, key=lambda x: x[0])
             for idx, (roi_key, roi) in enumerate(items_sorted):
                 roi["conversion"] = [plane, idx]
                 conversion_dict[roi_key] = roi
+
+        # Create conversion index across all ROIs.
+        # Sort by plane then by index within plane.
+        sorted_conversion = sorted(conversion_dict.items(), key=lambda x: (x[1]["conversion"][0], x[1]["conversion"][1]))
+        for new_index, (roi_key, roi) in enumerate(sorted_conversion):
+            roi["conversion index"] = new_index
+
         rois_conv_file = os.path.join(spines_gui_folder, "ROIs_conversion.npy")
         try:
             np.save(rois_conv_file, conversion_dict)
@@ -1283,7 +1301,7 @@ class MainWindow(QMainWindow):
                 print(f"[DEBUG] Error in extraction_wrapper for plane {plane}: {e}")
                 continue
 
-            # Spike Deconvolution using preprocess and oasis.
+            # Spike deconvolution.
             try:
                 print(f"[DEBUG] Running spike deconvolution for plane {plane}")
                 dF = F.copy() - ops["neucoeff"] * Fneu
