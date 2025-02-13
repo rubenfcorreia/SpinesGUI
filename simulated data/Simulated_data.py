@@ -1,22 +1,28 @@
 import numpy as np
 import tifffile as tiff
-import os
+
 # Constants
 width, height = 512, 512
 fps = 30
 duration = 120  # seconds
 frames = fps * duration  # Total frames = 3600
 circle_radius = 40
+initial_brightness = 50  # Start with some brightness
 
-# Define positions
+# Define new positions based on your request
 center = (width // 2, height // 2)
 corners = [(50, 50), (462, 50), (50, 462), (462, 462)]  # 4 corners
-pair = [(200, 256), (282, 256)]  # Close circles
+pair = [(180, 256), (332, 256)]  # Two circles farther apart horizontally
 
-# Function to create oscillating brightness pattern
-def oscillate(frequency, frame, max_brightness=255):
-    """Create an oscillating brightness pattern using a sine wave."""
-    return int((np.sin(2 * np.pi * frame / frequency) + 1) / 2 * max_brightness)
+# Function for fast brightness rise and fall (triangular wave)
+def pulse_brightness(frequency, frame, max_brightness=255, min_brightness=50):
+    """Creates a fast-rise, fast-fall brightness pulse effect using a triangular wave."""
+    cycle_pos = (frame % frequency) / frequency  # Cycle position (0 to 1)
+    if cycle_pos < 0.5:
+        brightness = min_brightness + (max_brightness - min_brightness) * (cycle_pos * 2)
+    else:
+        brightness = max_brightness - (max_brightness - min_brightness) * ((cycle_pos - 0.5) * 2)
+    return int(brightness)
 
 # Function to draw a circle
 def draw_circle(frame, position, brightness):
@@ -34,24 +40,27 @@ with tiff.TiffWriter(file_path, bigtiff=True) as tif:
         # Initialize single frame with 3 planes
         frame = np.zeros((3, height, width), dtype=np.uint8)
         
-        # Plane 1: Central circle oscillates every 10s
-        brightness1 = oscillate(10 * fps, f)
+        # Plane 1: Central circle - Brightens every 10s
+        brightness1 = pulse_brightness(10 * fps, f)
         draw_circle(frame[0], center, brightness1)
         
-        # Plane 2: Corner circles brightness
-        brightness2_left = oscillate(30 * fps, f)
-        brightness2_right = oscillate(5 * fps, f)
-        draw_circle(frame[1], corners[0], brightness2_left)
-        draw_circle(frame[1], corners[2], brightness2_left)
-        draw_circle(frame[1], corners[1], brightness2_right)
-        draw_circle(frame[1], corners[3], brightness2_right)
+        # Plane 2: Corner circles brightness with new cycles
+        brightness2_top_left = pulse_brightness(60 * fps, f)  # 60s cycle
+        brightness2_bottom_left = pulse_brightness(30 * fps, f)  # 30s cycle
+        brightness2_top_right = pulse_brightness(5 * fps, f)  # 5s cycle
+        brightness2_bottom_right = pulse_brightness(20 * fps, f)  # 20s cycle
+        draw_circle(frame[1], corners[0], brightness2_top_left)
+        draw_circle(frame[1], corners[2], brightness2_bottom_left)
+        draw_circle(frame[1], corners[1], brightness2_top_right)
+        draw_circle(frame[1], corners[3], brightness2_bottom_right)
         
-        # Plane 3: Pair of circles brightness oscillates every 50s
-        brightness3 = oscillate(50 * fps, f)
-        draw_circle(frame[2], pair[0], brightness3)
-        draw_circle(frame[2], pair[1], brightness3)
+        # Plane 3: Two circles - different cycles
+        brightness3_left = pulse_brightness(15 * fps, f)  # Left circle: 15s cycle
+        brightness3_right = pulse_brightness(50 * fps, f)  # Right circle: 50s cycle
+        draw_circle(frame[2], pair[0], brightness3_left)
+        draw_circle(frame[2], pair[1], brightness3_right)
         
         # Save frame incrementally
         tif.write(frame, photometric='minisblack')
 
-print(f"TIFF file saved as {file_path} in {os.os.getcwd()}")
+print(f"TIFF file saved as {file_path}")
