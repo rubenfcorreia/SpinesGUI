@@ -4,7 +4,7 @@ Spines GUI
 PyQt5 GUI for selecting, labeling, and extracting ROIs from Suite2p output.
 
 Features:
-  • Zoom in/out up to 500% using the mouse wheel and pan via left–click drag.
+  • Zoom in/out up to 500% using the mouse wheel and panning via left–click drag.
   • ROI drawing, editing, and deletion with a right–click menu.
   • A contrast slider allows adjusting the displayed mean image’s contrast without modifying the original meanImg.
   • ROIs.npy is stored in a "SpinesGUI" subfolder within the selected root folder.
@@ -182,7 +182,9 @@ class ROIItem(QGraphicsPolygonItem):
         self.roi_info = roi_info  # Expected keys: "roi-type", "plane", "ROI coordinates"
         self.main_window = main_window
         typ = self.roi_info["roi-type"][0]
-        color = {0: Qt.blue, 1: Qt.red, 2: Qt.green}.get(typ, Qt.gray)
+        base_color = {0: Qt.blue, 1: Qt.red, 2: Qt.green}.get(typ, Qt.gray)
+        color = QColor(base_color)
+        color.setAlpha(64)  # 75% transparency
         self.setPen(QPen(color, 2))
         self.setBrush(QBrush(Qt.transparent))
         self.setAcceptedMouseButtons(Qt.LeftButton | Qt.RightButton)
@@ -196,9 +198,9 @@ class ROIItem(QGraphicsPolygonItem):
             if self.scene() is not None:
                 self.scene().removeItem(marker)
         self.vertex_markers = []
-        radius = 2
+        r = 1  # Vertex radius changed to 1
         for pt in self.polygon():
-            rect = QRectF(pt.x() - radius, pt.y() - radius, 2 * radius, 2 * radius)
+            rect = QRectF(pt.x() - r, pt.y() - r, 2 * r, 2 * r)
             marker = QGraphicsEllipseItem(rect, self)
             marker.setBrush(QBrush(QColor("orange")))
             marker.setPen(QPen(Qt.black))
@@ -319,13 +321,13 @@ class CustomGraphicsView(QGraphicsView):
         delta = event.angleDelta().y() / 120
         factor = 1.1 ** delta
         new_scale = self.current_scale * factor
-        # Allow zooming up to 350%
+        # Allow zooming up to 500% (scale factor 5.0)
         if new_scale < 1.0:
             factor = 1.0 / self.current_scale
             self.current_scale = 1.0
-        elif new_scale > 5:
-            factor = 5 / self.current_scale
-            self.current_scale = 5
+        elif new_scale > 5.0:
+            factor = 5.0 / self.current_scale
+            self.current_scale = 5.0
         else:
             self.current_scale = new_scale
         self.scale(factor, factor)
@@ -353,10 +355,10 @@ class CustomGraphicsView(QGraphicsView):
                     self.parent_window.tracing_vertices = [scene_pos]
                     poly = QPolygonF(self.parent_window.tracing_vertices)
                     self.parent_window.tracing_polygon_item = QGraphicsPolygonItem(poly)
-                    self.parent_window.tracing_polygon_item.setPen(QPen(Qt.magenta, 2, Qt.DashLine))
+                    tracing_color = QColor(255, 0, 255, 64)  # Magenta with 75% transparency
+                    self.parent_window.tracing_polygon_item.setPen(QPen(tracing_color, 2, Qt.DashLine))
                     self.scene().addItem(self.parent_window.tracing_polygon_item)
-                    r = 3
-                    # First vertex in red.
+                    r = 1  # Vertex radius set to 1
                     marker = QGraphicsEllipseItem(QRectF(scene_pos.x()-r, scene_pos.y()-r, 2*r, 2*r))
                     marker.setBrush(QBrush(QColor("red")))
                     marker.setPen(QPen(Qt.black))
@@ -392,7 +394,8 @@ class CustomGraphicsView(QGraphicsView):
                 if self.first_click_point is None:
                     self.first_click_point = scene_pos
                     self.temp_polygon_item = QGraphicsPolygonItem()
-                    self.temp_polygon_item.setPen(QPen(Qt.red, 2, Qt.DashLine))
+                    temp_color = QColor(255, 0, 0, 64)  # Red with 75% transparency
+                    self.temp_polygon_item.setPen(QPen(temp_color, 2, Qt.DashLine))
                     self.scene().addItem(self.temp_polygon_item)
                     self.setDragMode(QGraphicsView.NoDrag)
                 else:
@@ -719,7 +722,7 @@ class MainWindow(QMainWindow):
         self.tracing_vertices = []
         self.tracing_polygon_item = None
         self.tracing_markers = []
-        self.current_meanImg = None  # Store original meanImg for contrast adjustments
+        self.current_meanImg = None  # Original meanImg for contrast adjustments
         self.init_ui()
 
     def init_ui(self):
@@ -776,13 +779,12 @@ class MainWindow(QMainWindow):
     def update_contrast(self):
         if self.current_meanImg is None:
             return
-        # Use the provided formula on the original image without modifying it.
+        # Use provided formula on original meanImg without modifying it.
         mimg = self.current_meanImg.astype(np.float32)
         mimg1 = np.percentile(mimg, 1)
         mimg99 = np.percentile(mimg, 99)
         mimg_disp = (mimg - mimg1) / (mimg99 - mimg1)
         mimg_disp = np.clip(mimg_disp, 0, 1)
-        # Apply contrast adjustment from the slider (default factor 1.0 when slider is 100)
         factor = self.contrast_slider.value() / 100.0
         mimg_disp = 0.5 + factor * (mimg_disp - 0.5)
         mimg_disp = np.clip(mimg_disp, 0, 1)
@@ -790,17 +792,15 @@ class MainWindow(QMainWindow):
         height, width = mimg_disp.shape
         image = QImage(mimg_disp.data, width, height, width, QImage.Format_Grayscale8)
         pixmap = QPixmap.fromImage(image)
-        # Try updating the existing pixmap item; if not valid, create a new one.
         try:
             if self.image_pixmap_item is None or self.image_pixmap_item.scene() is None:
-                raise RuntimeError("Pixmap item is not valid")
+                raise RuntimeError("Pixmap item invalid")
             else:
                 self.image_pixmap_item.setPixmap(pixmap)
         except RuntimeError:
             self.image_pixmap_item = QGraphicsPixmapItem(pixmap)
             self.graphics_scene.addItem(self.image_pixmap_item)
-        # Note: The yellow border is now added solely in update_plane_display().
-
+        # Note: Yellow border is added in update_plane_display().
 
     def load_suite2p_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Root Folder", os.getcwd())
@@ -862,12 +862,11 @@ class MainWindow(QMainWindow):
     def update_plane_display(self):
         if not self.plane_order:
             return
-        # Clear the scene to refresh everything.
-        self.graphics_scene.clear()
+        self.graphics_scene.clear()  # Clear scene to refresh everything including yellow border.
         plane_num = self.plane_order[self.current_plane_index]
         plane = self.plane_data[plane_num]
-        self.current_meanImg = plane["meanImg"]  # Original image for contrast adjustments
-        self.update_contrast()  # This now only updates the image
+        self.current_meanImg = plane["meanImg"]  # Original image for contrast adjustments.
+        self.update_contrast()  # This updates the displayed image.
         yrange = plane["yrange"]
         xrange_ = plane["xrange"]
         height, width = self.current_meanImg.shape
@@ -875,11 +874,9 @@ class MainWindow(QMainWindow):
         self.image_width = width
         valid_rect = QRectF(xrange_[0], yrange[0], xrange_[1]-xrange_[0], yrange[1]-yrange[0])
         self.current_valid_rect = valid_rect
-        # Add the valid region border (yellow) once.
         rect_item = self.graphics_scene.addRect(valid_rect, QPen(Qt.yellow, 2))
         rect_item.setZValue(1)
         self.current_plane_label.setText(f"Current plane: {plane_num}")
-        # Add ROI items for the current plane.
         for roi_id, info in self.roi_data.items():
             if info["plane"] == plane_num:
                 pts = info["ROI coordinates"]
@@ -889,7 +886,6 @@ class MainWindow(QMainWindow):
                 self.graphics_scene.addItem(roi_item)
                 self.roi_items[roi_id] = roi_item
         self.view.fitInView(self.image_pixmap_item, Qt.KeepAspectRatio)
-
 
     def clear_scene(self):
         self.graphics_scene.clear()
@@ -990,14 +986,15 @@ class MainWindow(QMainWindow):
             self.graphics_scene.removeItem(self.tracing_polygon_item)
         poly = QPolygonF(self.tracing_vertices)
         self.tracing_polygon_item = QGraphicsPolygonItem(poly)
-        self.tracing_polygon_item.setPen(QPen(Qt.magenta, 2, Qt.DashLine))
+        tracing_color = QColor(255, 0, 255, 64)  # Magenta with 75% transparency
+        self.tracing_polygon_item.setPen(QPen(tracing_color, 2, Qt.DashLine))
         self.graphics_scene.addItem(self.tracing_polygon_item)
         if self.tracing_markers:
             for marker in self.tracing_markers:
                 self.graphics_scene.removeItem(marker)
         self.tracing_markers = []
         for i, pt in enumerate(self.tracing_vertices):
-            r = 3
+            r = 1  # Changed radius for tracing vertices to 1
             marker = QGraphicsEllipseItem(QRectF(pt.x()-r, pt.y()-r, 2*r, 2*r))
             if i == 0:
                 marker.setBrush(QBrush(QColor("red")))
@@ -1099,13 +1096,17 @@ class MainWindow(QMainWindow):
                 item.setPen(QPen(QColor("purple"), 3))
             else:
                 typ = self.roi_data[r_id]["roi-type"][0]
-                color = {0: Qt.blue, 1: Qt.red, 2: Qt.green}.get(typ, Qt.gray)
+                base_color = {0: Qt.blue, 1: Qt.red, 2: Qt.green}.get(typ, Qt.gray)
+                color = QColor(base_color)
+                color.setAlpha(64)
                 item.setPen(QPen(color, 2))
 
     def clear_highlight(self):
         for r_id, item in self.roi_items.items():
             typ = self.roi_data[r_id]["roi-type"][0]
-            color = {0: Qt.blue, 1: Qt.red, 2: Qt.green}.get(typ, Qt.gray)
+            base_color = {0: Qt.blue, 1: Qt.red, 2: Qt.green}.get(typ, Qt.gray)
+            color = QColor(base_color)
+            color.setAlpha(64)
             item.setPen(QPen(color, 2))
 
     def remove_roi(self, roi_id):
@@ -1178,11 +1179,9 @@ class MainWindow(QMainWindow):
             for idx, (roi_key, roi) in enumerate(items_sorted):
                 roi["conversion"] = [plane, idx]
                 conversion_dict[roi_key] = roi
-        # Create conversion index across all ROIs.
         sorted_conversion = sorted(conversion_dict.items(), key=lambda x: (x[1]["conversion"][0], x[1]["conversion"][1]))
         for new_index, (roi_key, roi) in enumerate(sorted_conversion):
             roi["conversion index"] = new_index
-
         rois_conv_file = os.path.join(spines_gui_folder, "ROIs_conversion.npy")
         try:
             np.save(rois_conv_file, conversion_dict)
@@ -1191,13 +1190,11 @@ class MainWindow(QMainWindow):
             print(f"[DEBUG] Error saving ROIs_conversion: {e}")
             return
 
-        # Process extraction for each plane.
         for plane in self.plane_data.keys():
             print(f"[DEBUG] Processing extraction for plane {plane}")
             plane_folder = os.path.join(spines_gui_folder, f"plane{plane}")
             if not os.path.exists(plane_folder):
                 os.makedirs(plane_folder)
-            # Copy ops.npy.
             ops_src = os.path.join(self.plane_data[plane]["folder"], "ops.npy")
             ops_dest = os.path.join(plane_folder, "ops.npy")
             try:
@@ -1205,7 +1202,6 @@ class MainWindow(QMainWindow):
                 print(f"[DEBUG] Copied ops.npy from {ops_src} to {ops_dest}")
             except Exception as e:
                 print(f"[DEBUG] Error copying ops.npy for plane {plane}: {e}")
-            # Copy data.bin.
             data_bin_src = os.path.join(self.plane_data[plane]["folder"], "data.bin")
             data_bin_dest = os.path.join(plane_folder, "data.bin")
             try:
@@ -1214,7 +1210,6 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"[DEBUG] Error copying data.bin for plane {plane}: {e}")
                 continue
-            # Copy data_chan2.bin if exists.
             data_chan2_src = os.path.join(self.plane_data[plane]["folder"], "data_chan2.bin")
             data_chan2_dest = os.path.join(plane_folder, "data_chan2.bin")
             if os.path.exists(data_chan2_src):
@@ -1227,7 +1222,6 @@ class MainWindow(QMainWindow):
             else:
                 data_chan2_dest = None
 
-            # Load copied ops.
             try:
                 ops = np.load(ops_dest, allow_pickle=True).item()
                 print(f"[DEBUG] Loaded copied ops.npy for plane {plane}")
@@ -1235,7 +1229,6 @@ class MainWindow(QMainWindow):
                 print(f"[DEBUG] Error loading copied ops.npy for plane {plane}: {e}")
                 continue
 
-            # Get extraction parameters.
             Ly = ops.get("Ly")
             Lx = ops.get("Lx")
             aspect = ops.get("aspect", 1.0)
@@ -1252,7 +1245,6 @@ class MainWindow(QMainWindow):
                 do_crop = do_crop[0]
             print(f"[DEBUG] For plane {plane}, parameters: Ly={Ly}, Lx={Lx}, aspect={aspect}, diameter={diameter}, max_overlap={max_overlap}, do_crop={do_crop}")
 
-            # Compute stat0.
             stat0 = {}
             roi_list = [(k, roi) for k, roi in self.roi_data.items() if roi["plane"] == plane]
             roi_list_sorted = sorted(roi_list, key=lambda x: x[0])
@@ -1284,7 +1276,6 @@ class MainWindow(QMainWindow):
                 continue
             stat0_list = list(stat0.values())
 
-            # Compute stat1.
             try:
                 print("[DEBUG] Calling roi_stats with patched roi_stats")
                 stat1 = roi_stats(stat0_list, Ly, Lx, aspect=aspect, diameter=diameter,
@@ -1296,7 +1287,6 @@ class MainWindow(QMainWindow):
                 print(f"[DEBUG] Error in roi_stats for plane {plane}: {e}")
                 continue
 
-            # Load binary files from copied files.
             try:
                 f_reg_data = BinaryFile(Ly, Lx, data_bin_dest, n_frames=ops.get("nframes"), dtype=ops.get("datatype", "int16"))
                 print(f"[DEBUG] Loaded BinaryFile for data.bin for plane {plane}")
@@ -1313,7 +1303,6 @@ class MainWindow(QMainWindow):
             else:
                 f_reg_chan2_data = None
 
-            # Run extraction_wrapper.
             try:
                 print(f"[DEBUG] Calling extraction_wrapper for plane {plane}")
                 outputs = extraction_wrapper(stat1, f_reg_data, f_reg_chan2_data,
@@ -1329,7 +1318,6 @@ class MainWindow(QMainWindow):
                 print(f"[DEBUG] Error in extraction_wrapper for plane {plane}: {e}")
                 continue
 
-            # Spike deconvolution.
             try:
                 print(f"[DEBUG] Running spike deconvolution for plane {plane}")
                 dF = F.copy() - ops["neucoeff"] * Fneu
@@ -1345,7 +1333,6 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"[DEBUG] Error in spike deconvolution for plane {plane}: {e}")
 
-            # Create iscell.npy.
             try:
                 roi_ids = [roi_id for roi_id, info in self.roi_data.items() if info["plane"] == plane]
                 iscell_arr = np.ones((len(roi_ids), 2), dtype=int)
@@ -1373,13 +1360,17 @@ class MainWindow(QMainWindow):
                 item.setPen(QPen(QColor("purple"), 3))
             else:
                 typ = self.roi_data[r_id]["roi-type"][0]
-                color = {0: Qt.blue, 1: Qt.red, 2: Qt.green}.get(typ, Qt.gray)
+                base_color = {0: Qt.blue, 1: Qt.red, 2: Qt.green}.get(typ, Qt.gray)
+                color = QColor(base_color)
+                color.setAlpha(64)
                 item.setPen(QPen(color, 2))
 
     def clear_highlight(self):
         for r_id, item in self.roi_items.items():
             typ = self.roi_data[r_id]["roi-type"][0]
-            color = {0: Qt.blue, 1: Qt.red, 2: Qt.green}.get(typ, Qt.gray)
+            base_color = {0: Qt.blue, 1: Qt.red, 2: Qt.green}.get(typ, Qt.gray)
+            color = QColor(base_color)
+            color.setAlpha(64)
             item.setPen(QPen(color, 2))
 
     def remove_roi(self, roi_id):
@@ -1410,6 +1401,261 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
 
+    def extract_rois(self):
+        print("[DEBUG] Starting extraction process")
+        if self.root_folder is None:
+            QMessageBox.warning(self, "Error", "No root folder loaded.")
+            return
+        spines_gui_folder = os.path.join(self.root_folder, "SpinesGUI")
+        if not os.path.exists(spines_gui_folder):
+            os.makedirs(spines_gui_folder)
+        reextract = False
+        for plane in self.plane_data.keys():
+            plane_folder = os.path.join(spines_gui_folder, f"plane{plane}")
+            stat1_file = os.path.join(plane_folder, "stat1.npy")
+            if os.path.exists(stat1_file):
+                reextract = True
+                break
+        if reextract:
+            confirm = QMessageBox.question(self, "Re-run Extraction",
+                                           "Are you sure? This will re-run extraction and delete previous extraction files.",
+                                           QMessageBox.Yes | QMessageBox.No)
+            if confirm != QMessageBox.Yes:
+                return
+            for plane in self.plane_data.keys():
+                plane_folder = os.path.join(spines_gui_folder, f"plane{plane}")
+                for fname in ["stat0.npy", "stat1.npy", "stat.npy", "F.npy", "Fneu.npy", "F_chan2.npy", "Fneu_chan2.npy", "spks.npy", "iscell.npy"]:
+                    fpath = os.path.join(plane_folder, fname)
+                    if os.path.exists(fpath):
+                        try:
+                            os.remove(fpath)
+                            print(f"[DEBUG] Deleted {fpath}")
+                        except Exception as e:
+                            print(f"[DEBUG] Error deleting {fpath}: {e}")
+        conversion_dict = {}
+        plane_groups = {}
+        for key, roi in self.roi_data.items():
+            p = roi["plane"]
+            plane_groups.setdefault(p, []).append((key, roi))
+        for plane, items in plane_groups.items():
+            items_sorted = sorted(items, key=lambda x: x[0])
+            for idx, (roi_key, roi) in enumerate(items_sorted):
+                roi["conversion"] = [plane, idx]
+                conversion_dict[roi_key] = roi
+        sorted_conversion = sorted(conversion_dict.items(), key=lambda x: (x[1]["conversion"][0], x[1]["conversion"][1]))
+        for new_index, (roi_key, roi) in enumerate(sorted_conversion):
+            roi["conversion index"] = new_index
+        rois_conv_file = os.path.join(spines_gui_folder, "ROIs_conversion.npy")
+        try:
+            np.save(rois_conv_file, conversion_dict)
+            print(f"[DEBUG] Saved ROIs_conversion to {rois_conv_file}")
+        except Exception as e:
+            print(f"[DEBUG] Error saving ROIs_conversion: {e}")
+            return
+
+        for plane in self.plane_data.keys():
+            print(f"[DEBUG] Processing extraction for plane {plane}")
+            plane_folder = os.path.join(spines_gui_folder, f"plane{plane}")
+            if not os.path.exists(plane_folder):
+                os.makedirs(plane_folder)
+            ops_src = os.path.join(self.plane_data[plane]["folder"], "ops.npy")
+            ops_dest = os.path.join(plane_folder, "ops.npy")
+            try:
+                shutil.copy(ops_src, ops_dest)
+                print(f"[DEBUG] Copied ops.npy from {ops_src} to {ops_dest}")
+            except Exception as e:
+                print(f"[DEBUG] Error copying ops.npy for plane {plane}: {e}")
+            data_bin_src = os.path.join(self.plane_data[plane]["folder"], "data.bin")
+            data_bin_dest = os.path.join(plane_folder, "data.bin")
+            try:
+                shutil.copy(data_bin_src, data_bin_dest)
+                print(f"[DEBUG] Copied data.bin from {data_bin_src} to {data_bin_dest}")
+            except Exception as e:
+                print(f"[DEBUG] Error copying data.bin for plane {plane}: {e}")
+                continue
+            data_chan2_src = os.path.join(self.plane_data[plane]["folder"], "data_chan2.bin")
+            data_chan2_dest = os.path.join(plane_folder, "data_chan2.bin")
+            if os.path.exists(data_chan2_src):
+                try:
+                    shutil.copy(data_chan2_src, data_chan2_dest)
+                    print(f"[DEBUG] Copied data_chan2.bin from {data_chan2_src} to {data_chan2_dest}")
+                except Exception as e:
+                    print(f"[DEBUG] Error copying data_chan2.bin for plane {plane}: {e}")
+                    data_chan2_dest = None
+            else:
+                data_chan2_dest = None
+            try:
+                ops = np.load(ops_dest, allow_pickle=True).item()
+                print(f"[DEBUG] Loaded copied ops.npy for plane {plane}")
+            except Exception as e:
+                print(f"[DEBUG] Error loading copied ops.npy for plane {plane}: {e}")
+                continue
+
+            Ly = ops.get("Ly")
+            Lx = ops.get("Lx")
+            aspect = ops.get("aspect", 1.0)
+            if isinstance(aspect, (list, tuple, np.ndarray)):
+                aspect = aspect[0]
+            diameter = ops.get("diameter", 10)
+            if isinstance(diameter, (list, tuple, np.ndarray)):
+                diameter = diameter[0]
+            max_overlap = ops.get("max_overlap", 1.0)
+            if isinstance(max_overlap, (list, tuple, np.ndarray)):
+                max_overlap = max_overlap[0]
+            do_crop = ops.get("soma_crop", 1)
+            if isinstance(do_crop, (list, tuple, np.ndarray)):
+                do_crop = do_crop[0]
+            print(f"[DEBUG] For plane {plane}, parameters: Ly={Ly}, Lx={Lx}, aspect={aspect}, diameter={diameter}, max_overlap={max_overlap}, do_crop={do_crop}")
+
+            stat0 = {}
+            roi_list = [(k, roi) for k, roi in self.roi_data.items() if roi["plane"] == plane]
+            roi_list_sorted = sorted(roi_list, key=lambda x: x[0])
+            for idx, (roi_key, roi) in enumerate(roi_list_sorted):
+                vertices = np.array(roi["ROI coordinates"])
+                if vertices.size == 0:
+                    print(f"[DEBUG] ROI {roi_key} on plane {plane} has no vertices.")
+                    continue
+                x_min = int(np.floor(np.min(vertices[:, 0])))
+                x_max = int(np.ceil(np.max(vertices[:, 0])))
+                y_min = int(np.floor(np.min(vertices[:, 1])))
+                y_max = int(np.ceil(np.max(vertices[:, 1])))
+                xx, yy = np.meshgrid(np.arange(x_min, x_max+1), np.arange(y_min, y_max+1))
+                points = np.vstack((xx.flatten(), yy.flatten())).T
+                poly_path = Path(vertices)
+                inside = poly_path.contains_points(points)
+                inside = inside.reshape(yy.shape)
+                ypix = np.where(inside)[0] + y_min
+                xpix = np.where(inside)[1] + x_min
+                lam = np.ones(ypix.shape)
+                stat0[idx] = {"ypix": np.array(ypix), "xpix": np.array(xpix), "lam": np.array(lam)}
+                print(f"[DEBUG] Plane {plane}, ROI index {idx}: computed mask with {len(ypix)} pixels.")
+            stat0_file = os.path.join(plane_folder, "stat0.npy")
+            try:
+                np.save(stat0_file, stat0)
+                print(f"[DEBUG] Saved stat0.npy for plane {plane} in {plane_folder}")
+            except Exception as e:
+                print(f"[DEBUG] Error saving stat0.npy for plane {plane}: {e}")
+                continue
+            stat0_list = list(stat0.values())
+            try:
+                print("[DEBUG] Calling roi_stats with patched roi_stats")
+                stat1 = roi_stats(stat0_list, Ly, Lx, aspect=aspect, diameter=diameter,
+                                  max_overlap=max_overlap, do_crop=do_crop)
+                stat1_file = os.path.join(plane_folder, "stat1.npy")
+                np.save(stat1_file, stat1)
+                print(f"[DEBUG] Saved stat1.npy for plane {plane} in {plane_folder}")
+            except Exception as e:
+                print(f"[DEBUG] Error in roi_stats for plane {plane}: {e}")
+                continue
+            try:
+                f_reg_data = BinaryFile(Ly, Lx, data_bin_dest, n_frames=ops.get("nframes"), dtype=ops.get("datatype", "int16"))
+                print(f"[DEBUG] Loaded BinaryFile for data.bin for plane {plane}")
+            except Exception as e:
+                print(f"[DEBUG] Error loading BinaryFile for data.bin for plane {plane}: {e}")
+                continue
+            if data_chan2_dest is not None:
+                try:
+                    f_reg_chan2_data = BinaryFile(Ly, Lx, data_chan2_dest, n_frames=ops.get("nframes"), dtype=ops.get("datatype", "int16"))
+                    print(f"[DEBUG] Loaded BinaryFile for data_chan2.bin for plane {plane}")
+                except Exception as e:
+                    print(f"[DEBUG] Error loading BinaryFile for data_chan2.bin for plane {plane}: {e}")
+                    f_reg_chan2_data = None
+            else:
+                f_reg_chan2_data = None
+            try:
+                print(f"[DEBUG] Calling extraction_wrapper for plane {plane}")
+                outputs = extraction_wrapper(stat1, f_reg_data, f_reg_chan2_data,
+                                             cell_masks=None, neuropil_masks=None, ops=ops)
+                stat_out, F, Fneu, F_chan2, Fneu_chan2 = outputs
+                np.save(os.path.join(plane_folder, "stat.npy"), stat_out)
+                np.save(os.path.join(plane_folder, "F.npy"), F)
+                np.save(os.path.join(plane_folder, "Fneu.npy"), Fneu)
+                np.save(os.path.join(plane_folder, "F_chan2.npy"), F_chan2)
+                np.save(os.path.join(plane_folder, "Fneu_chan2.npy"), Fneu_chan2)
+                print(f"[DEBUG] Extraction complete for plane {plane}.")
+            except Exception as e:
+                print(f"[DEBUG] Error in extraction_wrapper for plane {plane}: {e}")
+                continue
+            try:
+                print(f"[DEBUG] Running spike deconvolution for plane {plane}")
+                dF = F.copy() - ops["neucoeff"] * Fneu
+                dF = preprocess(F=dF, baseline=ops["baseline"],
+                                win_baseline=ops["win_baseline"],
+                                sig_baseline=ops["sig_baseline"],
+                                fs=ops["fs"],
+                                prctile_baseline=ops["prctile_baseline"])
+                spks = oasis(F=dF, batch_size=ops["batch_size"], tau=ops["tau"], fs=ops["fs"])
+                spks_file = os.path.join(plane_folder, "spks.npy")
+                np.save(spks_file, spks)
+                print(f"[DEBUG] Saved spks.npy for plane {plane} in {plane_folder}")
+            except Exception as e:
+                print(f"[DEBUG] Error in spike deconvolution for plane {plane}: {e}")
+            try:
+                roi_ids = [roi_id for roi_id, info in self.roi_data.items() if info["plane"] == plane]
+                iscell_arr = np.ones((len(roi_ids), 2), dtype=int)
+                iscell_file = os.path.join(plane_folder, "iscell.npy")
+                np.save(iscell_file, iscell_arr)
+                print(f"[DEBUG] Saved iscell.npy for plane {plane} in {plane_folder}")
+            except Exception as e:
+                print(f"[DEBUG] Error creating iscell.npy for plane {plane}: {e}")
+        QMessageBox.information(self, "Extraction Finished", "Extraction finished.")
+        try:
+            conv_dict = np.load(rois_conv_file, allow_pickle=True).item()
+            print("[DEBUG] Loaded ROIs_conversion dictionary for display")
+            conv_dialog = ConversionTableDialog(conv_dict, self)
+            conv_dialog.exec_()
+        except Exception as e:
+            print(f"[DEBUG] Error showing conversion table: {e}")
+
+    def highlight_roi(self, roi_id):
+        if roi_id is None:
+            self.clear_highlight()
+            return
+        for r_id, item in self.roi_items.items():
+            if r_id == roi_id:
+                item.setPen(QPen(QColor("purple"), 3))
+            else:
+                typ = self.roi_data[r_id]["roi-type"][0]
+                base_color = {0: Qt.blue, 1: Qt.red, 2: Qt.green}.get(typ, Qt.gray)
+                color = QColor(base_color)
+                color.setAlpha(64)
+                item.setPen(QPen(color, 2))
+
+    def clear_highlight(self):
+        for r_id, item in self.roi_items.items():
+            typ = self.roi_data[r_id]["roi-type"][0]
+            base_color = {0: Qt.blue, 1: Qt.red, 2: Qt.green}.get(typ, Qt.gray)
+            color = QColor(base_color)
+            color.setAlpha(64)
+            item.setPen(QPen(color, 2))
+
+    def remove_roi(self, roi_id):
+        if roi_id in self.roi_items:
+            self.graphics_scene.removeItem(self.roi_items[roi_id])
+            del self.roi_items[roi_id]
+        if roi_id in self.roi_data:
+            del self.roi_data[roi_id]
+        self.save_rois()
+
+    def clear_all_rois(self):
+        confirm = QMessageBox.question(self, "Clear All ROIs",
+                                       "Are you sure you want to clear all ROIs?",
+                                       QMessageBox.Yes | QMessageBox.No)
+        if confirm == QMessageBox.Yes:
+            for item in list(self.roi_items.values()):
+                self.graphics_scene.removeItem(item)
+            self.roi_items.clear()
+            self.roi_data.clear()
+            self.next_roi_id = 0
+            self.save_rois()
+
+    def closeEvent(self, event):
+        reply = QMessageBox.question(self, "Exit Confirmation", "Do you wish to exit?",
+                                     QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            event.accept()
+        else:
+            event.ignore()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
