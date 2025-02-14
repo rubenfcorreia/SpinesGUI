@@ -4,7 +4,7 @@ Spines GUI
 PyQt5 GUI for selecting, labeling, and extracting ROIs from Suite2p output.
 
 Features:
-  • Zoom in/out up to 350% using the mouse wheel and pan via left–click drag.
+  • Zoom in/out up to 500% using the mouse wheel and pan via left–click drag.
   • ROI drawing, editing, and deletion with a right–click menu.
   • A contrast slider allows adjusting the displayed mean image’s contrast without modifying the original meanImg.
   • ROIs.npy is stored in a "SpinesGUI" subfolder within the selected root folder.
@@ -196,7 +196,7 @@ class ROIItem(QGraphicsPolygonItem):
             if self.scene() is not None:
                 self.scene().removeItem(marker)
         self.vertex_markers = []
-        radius = 3
+        radius = 2
         for pt in self.polygon():
             rect = QRectF(pt.x() - radius, pt.y() - radius, 2 * radius, 2 * radius)
             marker = QGraphicsEllipseItem(rect, self)
@@ -323,9 +323,9 @@ class CustomGraphicsView(QGraphicsView):
         if new_scale < 1.0:
             factor = 1.0 / self.current_scale
             self.current_scale = 1.0
-        elif new_scale > 3.5:
-            factor = 3.5 / self.current_scale
-            self.current_scale = 3.5
+        elif new_scale > 5:
+            factor = 5 / self.current_scale
+            self.current_scale = 5
         else:
             self.current_scale = new_scale
         self.scale(factor, factor)
