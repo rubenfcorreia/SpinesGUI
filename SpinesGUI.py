@@ -4,16 +4,17 @@ Spines GUI
 PyQt5 GUI for selecting, labeling, and extracting ROIs from Suite2p output.
 
 Features:
-  • Zoom in/out up to 350% using the mouse wheel and pan with left-click drag.
+  • Zoom in/out up to 350% using the mouse wheel and pan via left–click drag.
   • ROI drawing, editing, and deletion with a right–click menu.
+  • A contrast slider allows adjusting the displayed mean image’s contrast without modifying the original meanImg.
   • ROIs.npy is stored in a "SpinesGUI" subfolder within the selected root folder.
   • "Extract ROIs" button:
-       1. Copies ops.npy, data.bin, and (if available) data_chan2.bin from each original plane folder
-          (in the root) to the corresponding plane folder in the SpinesGUI subfolder.
+       1. Copies ops.npy, data.bin, and data_chan2.bin (if available) from each original plane folder
+          to the corresponding plane folder in SpinesGUI.
        2. Computes ROI masks (stat0) and ROI statistics (stat1) using a patched roi_stats.
        3. Loads the copied binary files using BinaryFile.
        4. Calls extraction_wrapper to extract ROI signals.
-       5. Performs spike deconvolution as follows:
+       5. Performs spike deconvolution:
              dF = F.copy() - ops["neucoeff"] * Fneu  
              dF = preprocess(F=dF, baseline=ops["baseline"],
                              win_baseline=ops["win_baseline"],
@@ -23,9 +24,9 @@ Features:
              spks = oasis(F=dF, batch_size=ops["batch_size"], tau=ops["tau"], fs=ops["fs"])
           and saves the result to spks.npy.
        6. Creates iscell.npy as a 2D array where each ROI is marked [1, 1].
-       7. Builds ROIs_conversion.npy by taking the conversion info ([plane, index_in_plane])
-          and also adding a "conversion index" (a sequential integer based on the order across planes).
-       8. Finally, displays a conversion table dialog.
+       7. Builds ROIs_conversion.npy by adding both a "conversion" field ([plane, index])
+          and a "conversion index" (a sequential integer assigned after sorting).
+       8. Displays a conversion table dialog.
   • A ROIs table is also available.
   
 Requirements:
@@ -43,7 +44,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QFileDialog, QM
                              QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsPolygonItem,
                              QGraphicsEllipseItem, QPushButton, QLabel, QVBoxLayout, QHBoxLayout,
                              QFormLayout, QDialog, QComboBox, QLineEdit, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QMenu)
+                             QHeaderView, QMenu, QSlider)
 
 # Import Suite2p functions and BinaryFile.
 try:
@@ -83,7 +84,7 @@ class ROI:
         self.lam = lam
         self.med = med
         self.do_crop = do_crop
-        # Dummy statistics for demonstration purposes.
+        # Dummy statistics for demonstration.
         self.mean_r_squared = 1.0
         self.mean_r_squared0 = 1.0
         self.mean_r_squared_compact = 1.0
@@ -318,7 +319,7 @@ class CustomGraphicsView(QGraphicsView):
         delta = event.angleDelta().y() / 120
         factor = 1.1 ** delta
         new_scale = self.current_scale * factor
-        # Allow zooming up to 350% (scale factor 3.5)
+        # Allow zooming up to 350%
         if new_scale < 1.0:
             factor = 1.0 / self.current_scale
             self.current_scale = 1.0
@@ -355,7 +356,7 @@ class CustomGraphicsView(QGraphicsView):
                     self.parent_window.tracing_polygon_item.setPen(QPen(Qt.magenta, 2, Qt.DashLine))
                     self.scene().addItem(self.parent_window.tracing_polygon_item)
                     r = 3
-                    # Highlight the first vertex in a different color (red)
+                    # First vertex in red.
                     marker = QGraphicsEllipseItem(QRectF(scene_pos.x()-r, scene_pos.y()-r, 2*r, 2*r))
                     marker.setBrush(QBrush(QColor("red")))
                     marker.setPen(QPen(Qt.black))
@@ -520,7 +521,7 @@ class ConversionTableDialog(QDialog):
     def init_ui(self):
         layout = QVBoxLayout()
         self.table = QTableWidget()
-        # Added new column for conversion index.
+        # 9 columns: added one for "Conversion Index"
         self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels(["ROI #", "ROI Type", "Cell ID", "Parent Dendrite ID",
                                                "Dendritic Spine ID", "Plane", "ROI Coordinates", "Conversion", "Conversion Index"])
@@ -718,6 +719,7 @@ class MainWindow(QMainWindow):
         self.tracing_vertices = []
         self.tracing_polygon_item = None
         self.tracing_markers = []
+        self.current_meanImg = None  # Store original meanImg for contrast adjustments
         self.init_ui()
 
     def init_ui(self):
@@ -745,8 +747,20 @@ class MainWindow(QMainWindow):
         self.right_arrow_button = QPushButton(">")
         self.right_arrow_button.clicked.connect(lambda: self.change_plane(1))
         self.current_plane_label = QLabel("Current plane: N/A")
+        self.contrast_label = QLabel("Contrast:")
+        self.contrast_slider = QSlider(Qt.Horizontal)
+        self.contrast_slider.setMinimum(50)
+        self.contrast_slider.setMaximum(200)
+        self.contrast_slider.setValue(100)
+        self.contrast_slider.valueChanged.connect(self.update_contrast)
         self.coord_label = QLabel("X : Out of range\nY : Out of range")
         self.coord_label.setAlignment(Qt.AlignRight | Qt.AlignBottom)
+        bottom_layout.addWidget(self.current_plane_label)
+        bottom_layout.addStretch()
+        bottom_layout.addWidget(self.contrast_label)
+        bottom_layout.addWidget(self.contrast_slider)
+        bottom_layout.addStretch()
+        bottom_layout.addWidget(self.coord_label)
         top_layout.addWidget(self.load_button)
         top_layout.addWidget(self.add_roi_button)
         top_layout.addWidget(self.roi_table_button)
@@ -754,13 +768,39 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(self.clear_rois_button)
         top_layout.addWidget(self.left_arrow_button)
         top_layout.addWidget(self.right_arrow_button)
-        bottom_layout.addWidget(self.current_plane_label)
-        bottom_layout.addStretch()
-        bottom_layout.addWidget(self.coord_label)
         main_layout.addLayout(top_layout)
         main_layout.addWidget(self.view)
         main_layout.addLayout(bottom_layout)
         central_widget.setLayout(main_layout)
+
+    def update_contrast(self):
+        if self.current_meanImg is None:
+            return
+        # Use the provided formula on the original image without modifying it.
+        mimg = self.current_meanImg.astype(np.float32)
+        mimg1 = np.percentile(mimg, 1)
+        mimg99 = np.percentile(mimg, 99)
+        mimg_disp = (mimg - mimg1) / (mimg99 - mimg1)
+        mimg_disp = np.clip(mimg_disp, 0, 1)
+        # Apply contrast adjustment from the slider (default factor 1.0 when slider is 100)
+        factor = self.contrast_slider.value() / 100.0
+        mimg_disp = 0.5 + factor * (mimg_disp - 0.5)
+        mimg_disp = np.clip(mimg_disp, 0, 1)
+        mimg_disp = (mimg_disp * 255).astype(np.uint8)
+        height, width = mimg_disp.shape
+        image = QImage(mimg_disp.data, width, height, width, QImage.Format_Grayscale8)
+        pixmap = QPixmap.fromImage(image)
+        # Try updating the existing pixmap item; if not valid, create a new one.
+        try:
+            if self.image_pixmap_item is None or self.image_pixmap_item.scene() is None:
+                raise RuntimeError("Pixmap item is not valid")
+            else:
+                self.image_pixmap_item.setPixmap(pixmap)
+        except RuntimeError:
+            self.image_pixmap_item = QGraphicsPixmapItem(pixmap)
+            self.graphics_scene.addItem(self.image_pixmap_item)
+        # Note: The yellow border is now added solely in update_plane_display().
+
 
     def load_suite2p_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Root Folder", os.getcwd())
@@ -822,29 +862,24 @@ class MainWindow(QMainWindow):
     def update_plane_display(self):
         if not self.plane_order:
             return
+        # Clear the scene to refresh everything.
+        self.graphics_scene.clear()
         plane_num = self.plane_order[self.current_plane_index]
         plane = self.plane_data[plane_num]
-        meanImg = plane["meanImg"]
+        self.current_meanImg = plane["meanImg"]  # Original image for contrast adjustments
+        self.update_contrast()  # This now only updates the image
         yrange = plane["yrange"]
         xrange_ = plane["xrange"]
-        mi = meanImg.astype(np.float32)
-        mi = ((mi - mi.min()) / (mi.max() - mi.min() + 1e-8)) * 255
-        mi = mi.astype(np.uint8)
-        height, width = mi.shape
+        height, width = self.current_meanImg.shape
         self.image_height = height
         self.image_width = width
-        image = QImage(mi.data, width, height, width, QImage.Format_Grayscale8)
-        pixmap = QPixmap.fromImage(image)
-        self.image_pixmap = pixmap
-        self.graphics_scene.clear()
-        self.image_pixmap_item = QGraphicsPixmapItem(pixmap)
-        self.graphics_scene.addItem(self.image_pixmap_item)
         valid_rect = QRectF(xrange_[0], yrange[0], xrange_[1]-xrange_[0], yrange[1]-yrange[0])
         self.current_valid_rect = valid_rect
+        # Add the valid region border (yellow) once.
         rect_item = self.graphics_scene.addRect(valid_rect, QPen(Qt.yellow, 2))
         rect_item.setZValue(1)
         self.current_plane_label.setText(f"Current plane: {plane_num}")
-        self.roi_items = {}
+        # Add ROI items for the current plane.
         for roi_id, info in self.roi_data.items():
             if info["plane"] == plane_num:
                 pts = info["ROI coordinates"]
@@ -854,6 +889,7 @@ class MainWindow(QMainWindow):
                 self.graphics_scene.addItem(roi_item)
                 self.roi_items[roi_id] = roi_item
         self.view.fitInView(self.image_pixmap_item, Qt.KeepAspectRatio)
+
 
     def clear_scene(self):
         self.graphics_scene.clear()
@@ -950,14 +986,12 @@ class MainWindow(QMainWindow):
         self.view.setDragMode(QGraphicsView.ScrollHandDrag)
 
     def update_tracing_display(self):
-        # Update the temporary tracing polygon and its vertex markers.
         if self.tracing_polygon_item:
             self.graphics_scene.removeItem(self.tracing_polygon_item)
         poly = QPolygonF(self.tracing_vertices)
         self.tracing_polygon_item = QGraphicsPolygonItem(poly)
         self.tracing_polygon_item.setPen(QPen(Qt.magenta, 2, Qt.DashLine))
         self.graphics_scene.addItem(self.tracing_polygon_item)
-        # Remove previous markers.
         if self.tracing_markers:
             for marker in self.tracing_markers:
                 self.graphics_scene.removeItem(marker)
@@ -965,7 +999,6 @@ class MainWindow(QMainWindow):
         for i, pt in enumerate(self.tracing_vertices):
             r = 3
             marker = QGraphicsEllipseItem(QRectF(pt.x()-r, pt.y()-r, 2*r, 2*r))
-            # Highlight the first vertex in red; others in yellow.
             if i == 0:
                 marker.setBrush(QBrush(QColor("red")))
             else:
@@ -976,7 +1009,6 @@ class MainWindow(QMainWindow):
             self.graphics_scene.addItem(marker)
 
     def cancel_tracing(self):
-        # Cancel the tracing process and remove temporary items.
         if self.tracing_polygon_item:
             self.graphics_scene.removeItem(self.tracing_polygon_item)
             self.tracing_polygon_item = None
@@ -989,7 +1021,6 @@ class MainWindow(QMainWindow):
         self.view.setDragMode(QGraphicsView.ScrollHandDrag)
 
     def _create_roi_from_points(self, pts):
-        # Determine ROI type based on pending selection and assign IDs.
         if self.pending_roi_type[0] == 0:
             cell_id = self.get_next_cell_id()
             roi_type_list = [0, cell_id, 0, 0]
@@ -1143,14 +1174,11 @@ class MainWindow(QMainWindow):
             p = roi["plane"]
             plane_groups.setdefault(p, []).append((key, roi))
         for plane, items in plane_groups.items():
-            # Sort items within the plane by ROI key.
             items_sorted = sorted(items, key=lambda x: x[0])
             for idx, (roi_key, roi) in enumerate(items_sorted):
                 roi["conversion"] = [plane, idx]
                 conversion_dict[roi_key] = roi
-
         # Create conversion index across all ROIs.
-        # Sort by plane then by index within plane.
         sorted_conversion = sorted(conversion_dict.items(), key=lambda x: (x[1]["conversion"][0], x[1]["conversion"][1]))
         for new_index, (roi_key, roi) in enumerate(sorted_conversion):
             roi["conversion index"] = new_index
@@ -1186,7 +1214,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"[DEBUG] Error copying data.bin for plane {plane}: {e}")
                 continue
-            # Copy data_chan2.bin if it exists.
+            # Copy data_chan2.bin if exists.
             data_chan2_src = os.path.join(self.plane_data[plane]["folder"], "data_chan2.bin")
             data_chan2_dest = os.path.join(plane_folder, "data_chan2.bin")
             if os.path.exists(data_chan2_src):
@@ -1199,7 +1227,7 @@ class MainWindow(QMainWindow):
             else:
                 data_chan2_dest = None
 
-            # Load the copied ops file.
+            # Load copied ops.
             try:
                 ops = np.load(ops_dest, allow_pickle=True).item()
                 print(f"[DEBUG] Loaded copied ops.npy for plane {plane}")
@@ -1224,7 +1252,7 @@ class MainWindow(QMainWindow):
                 do_crop = do_crop[0]
             print(f"[DEBUG] For plane {plane}, parameters: Ly={Ly}, Lx={Lx}, aspect={aspect}, diameter={diameter}, max_overlap={max_overlap}, do_crop={do_crop}")
 
-            # Compute stat0 from ROI masks.
+            # Compute stat0.
             stat0 = {}
             roi_list = [(k, roi) for k, roi in self.roi_data.items() if roi["plane"] == plane]
             roi_list_sorted = sorted(roi_list, key=lambda x: x[0])
@@ -1256,7 +1284,7 @@ class MainWindow(QMainWindow):
                 continue
             stat0_list = list(stat0.values())
 
-            # Compute stat1 using patched roi_stats.
+            # Compute stat1.
             try:
                 print("[DEBUG] Calling roi_stats with patched roi_stats")
                 stat1 = roi_stats(stat0_list, Ly, Lx, aspect=aspect, diameter=diameter,
@@ -1268,7 +1296,7 @@ class MainWindow(QMainWindow):
                 print(f"[DEBUG] Error in roi_stats for plane {plane}: {e}")
                 continue
 
-            # Load binary files from the copied files.
+            # Load binary files from copied files.
             try:
                 f_reg_data = BinaryFile(Ly, Lx, data_bin_dest, n_frames=ops.get("nframes"), dtype=ops.get("datatype", "int16"))
                 print(f"[DEBUG] Loaded BinaryFile for data.bin for plane {plane}")
@@ -1317,7 +1345,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"[DEBUG] Error in spike deconvolution for plane {plane}: {e}")
 
-            # Create iscell.npy: a 2D array with each row [1, 1] for every ROI on this plane.
+            # Create iscell.npy.
             try:
                 roi_ids = [roi_id for roi_id, info in self.roi_data.items() if info["plane"] == plane]
                 iscell_arr = np.ones((len(roi_ids), 2), dtype=int)
@@ -1328,7 +1356,6 @@ class MainWindow(QMainWindow):
                 print(f"[DEBUG] Error creating iscell.npy for plane {plane}: {e}")
 
         QMessageBox.information(self, "Extraction Finished", "Extraction finished.")
-        # After extraction, load ROIs_conversion and display it as a table.
         try:
             conv_dict = np.load(rois_conv_file, allow_pickle=True).item()
             print("[DEBUG] Loaded ROIs_conversion dictionary for display")
