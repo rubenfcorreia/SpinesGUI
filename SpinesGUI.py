@@ -462,8 +462,14 @@ class ROITableWindow(QDialog):
                 self.table.setItem(row, col, item)
 
     def row_clicked(self, row, col):
-        roi_number = int(self.table.item(row, 0).text())
+        text = self.table.item(row, 0).text()
+        try:
+            roi_number = int(text)
+        except ValueError:
+            print(f"[DEBUG] ROI number is not numeric: {text}. Ignoring this row.")
+            return
         self.main_window.highlight_roi(roi_number)
+
 
 
 class ConfirmROITableDialog(QDialog):
@@ -862,11 +868,14 @@ class MainWindow(QMainWindow):
     def update_plane_display(self):
         if not self.plane_order:
             return
-        self.graphics_scene.clear()  # Clear scene to refresh everything including yellow border.
+        # Clear scene and ROI items dictionary
+        self.graphics_scene.clear()
+        self.roi_items.clear()  # <-- Add this line to clear old ROIItems
+
         plane_num = self.plane_order[self.current_plane_index]
         plane = self.plane_data[plane_num]
-        self.current_meanImg = plane["meanImg"]  # Original image for contrast adjustments.
-        self.update_contrast()  # This updates the displayed image.
+        self.current_meanImg = plane["meanImg"]  # Original image for contrast adjustments
+        self.update_contrast()  # This updates the displayed image
         yrange = plane["yrange"]
         xrange_ = plane["xrange"]
         height, width = self.current_meanImg.shape
