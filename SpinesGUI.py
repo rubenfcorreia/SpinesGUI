@@ -4,7 +4,7 @@ Spines GUI
 PyQt5 GUI for selecting, labeling, and extracting ROIs from Suite2p output.
 
 Features:
-  • Zoom in/out up to 500% using the mouse wheel and panning via left–click drag.
+  • Zoom in/out up to 1000% using the mouse wheel and panning via left–click drag.
   • ROI drawing, editing, and deletion with a right–click menu.
   • A contrast slider allows adjusting the displayed mean image’s contrast without modifying the original meanImg.
   • ROIs.npy is stored in a "SpinesGUI" subfolder within the selected root folder.
@@ -321,13 +321,13 @@ class CustomGraphicsView(QGraphicsView):
         delta = event.angleDelta().y() / 120
         factor = 1.1 ** delta
         new_scale = self.current_scale * factor
-        # Allow zooming up to 500% (scale factor 5.0)
+        # Allow zooming up to 1000% (scale factor 10.0)
         if new_scale < 1.0:
             factor = 1.0 / self.current_scale
             self.current_scale = 1.0
-        elif new_scale > 5.0:
-            factor = 5.0 / self.current_scale
-            self.current_scale = 5.0
+        elif new_scale > 10.0:
+            factor = 10.0 / self.current_scale
+            self.current_scale = 10.0
         else:
             self.current_scale = new_scale
         self.scale(factor, factor)
@@ -635,7 +635,12 @@ class ROITypeDialog(QDialog):
         if self.assoc_combo.isVisible():
             assoc_key = self.assoc_combo.currentData()
             if self.parent():
-                self.parent().highlight_roi(assoc_key)
+                if assoc_key in self.parent().roi_data:
+                    self.parent().highlight_roi(assoc_key)
+                else:
+                    # Optionally, clear any highlight if the key is not found
+                    self.parent().clear_highlight()
+
 
     def accept(self):
         try:
