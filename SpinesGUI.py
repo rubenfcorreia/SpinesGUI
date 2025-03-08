@@ -36,7 +36,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QFileDialog, QM
                              QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsPolygonItem,
                              QGraphicsEllipseItem, QPushButton, QLabel, QVBoxLayout, QHBoxLayout,
                              QFormLayout, QDialog, QComboBox, QLineEdit, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QMenu, QSlider)
+                             QHeaderView, QMenu, QSlider, QButtonGroup, QRadioButton)
 
 # Import Suite2p functions and BinaryFile.
 try:
@@ -731,9 +731,9 @@ class ROIShapeDialog(QDialog):
     def init_ui(self):
         layout = QFormLayout()
         self.shape_combo = QComboBox()
+        self.shape_combo.addItem("Tracing", "tracing")
         self.shape_combo.addItem("Rectangle", "rectangle")
         self.shape_combo.addItem("Other Polygon", "polygon")
-        self.shape_combo.addItem("Tracing", "tracing")
         layout.addRow("ROI Shape:", self.shape_combo)
         self.sides_input = QLineEdit()
         self.sides_input.setPlaceholderText("Enter number of sides (3-10)")
@@ -825,17 +825,25 @@ class MainWindow(QMainWindow):
         self.contrast_slider.setMaximum(200)
         self.contrast_slider.setValue(100)
         self.contrast_slider.valueChanged.connect(self.update_contrast)
-        self.view_selector = QComboBox()
-        self.view_selector.addItem("Mean Image")
-        self.view_selector.addItem("Mean Image Enhanced")
-        self.view_selector.currentIndexChanged.connect(self.update_view)
+        self.view_button_group = QButtonGroup(self)
+        self.radio_mean = QRadioButton("Mean Image")
+        self.radio_mean_enhanced = QRadioButton("Mean Image Enhanced")
+        self.radio_mean.setChecked(True)  # Default selection.
+        self.view_button_group.addButton(self.radio_mean, 0)
+        self.view_button_group.addButton(self.radio_mean_enhanced, 1)
+        self.radio_mean.toggled.connect(self.update_view)
+        self.radio_mean_enhanced.toggled.connect(self.update_view)
+        view_layout = QHBoxLayout()
+        view_layout.addWidget(self.radio_mean)
+        view_layout.addWidget(self.radio_mean_enhanced)
+        view_layout.addStretch()
         self.coord_label = QLabel("X : Out of range\nY : Out of range")
         self.coord_label.setAlignment(Qt.AlignRight | Qt.AlignBottom)
         bottom_layout.addWidget(self.current_plane_label)
         bottom_layout.addStretch()
         bottom_layout.addWidget(self.contrast_label)
         bottom_layout.addWidget(self.contrast_slider)
-        bottom_layout.addWidget(self.view_selector)
+        bottom_layout.addLayout(view_layout)
         bottom_layout.addStretch()
         bottom_layout.addWidget(self.coord_label)
         top_layout.addWidget(self.load_button)
@@ -932,9 +940,13 @@ class MainWindow(QMainWindow):
             print("[DEBUG] ROI file not found at", rois_file, flush=True)
 
     def update_view(self):
-        self.current_view = self.view_selector.currentText()
-        print(f"[DEBUG] Current view: {self.current_view}")
-        # Update current_meanImg for the current plane based on the view:
+        # Determine the current view based on which radio button is checked.
+        if self.radio_mean.isChecked():
+            self.current_view = "Mean Image"
+        else:
+            self.current_view = "Mean Image Enhanced"
+        print(f"[DEBUG] Current view: {self.current_view}", flush=True)
+        # Update self.current_meanImg based on the selected view and current plane.
         if self.plane_order:
             plane_num = self.plane_order[self.current_plane_index]
             plane = self.plane_data[plane_num]
@@ -942,9 +954,11 @@ class MainWindow(QMainWindow):
                 self.current_meanImg = plane["meanImgE"]
             else:
                 self.current_meanImg = plane["meanImg"]
+        # Preserve the current transformation and update the contrast.
         current_transform = self.view.transform()
         self.update_contrast()
         self.view.setTransform(current_transform)
+
     def update_contrast(self):
         if self.current_meanImg is None:
             return
