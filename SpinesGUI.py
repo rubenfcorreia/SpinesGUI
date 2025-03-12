@@ -1582,7 +1582,6 @@ class MainWindow(QMainWindow):
                     log.write(f"Calling extraction_wrapper for plane {plane}\n")
                 
                 # Redirect stdout to capture what extraction_wrapper prints.
-                import io, sys
                 old_stdout = sys.stdout
                 sys.stdout = mystdout = io.StringIO()
                 try:
