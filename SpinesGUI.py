@@ -1428,7 +1428,9 @@ class MainWindow(QMainWindow):
             data_bin_dest = os.path.join(plane_folder, "data.bin")
             if not os.path.exists(data_bin_dest):
                 try:
-                    shutil.copy(data_bin_src, data_bin_dest)
+                    #shutil.copy(data_bin_src, data_bin_dest)
+                    with open(data_bin_src, 'rb') as fsrc, open(data_bin_dest, 'wb') as fdst:
+                        shutil.copyfileobj(fsrc, fdst, length=16 * 1024)
                     print(f"[DEBUG] Copied data.bin from {data_bin_src} to {data_bin_dest}", flush=True)
                     with open(log_file, "a") as log:
                         log.write(f"Copied data.bin from {data_bin_src} to {data_bin_dest}\n")
@@ -1448,7 +1450,9 @@ class MainWindow(QMainWindow):
             if os.path.exists(data_chan2_src):
                 if not os.path.exists(data_chan2_dest):
                     try:
-                        shutil.copy(data_chan2_src, data_chan2_dest)
+                        #shutil.copy(data_chan2_src, data_chan2_dest)
+                        with open(data_chan2_src, 'rb') as fsrc2, open(data_chan2_dest, 'wb') as fdst2:
+                            shutil.copyfileobj(fsrc2, fdst2, length=16 * 1024)
                         print(f"[DEBUG] Copied data_chan2.bin from {data_chan2_src} to {data_chan2_dest}", flush=True)
                         with open(log_file, "a") as log:
                             log.write(f"Copied data_chan2.bin from {data_chan2_src} to {data_chan2_dest}\n")
@@ -1464,8 +1468,19 @@ class MainWindow(QMainWindow):
             else:
                 data_chan2_dest = None
 
-            # Load ops from the copied ops.npy.
+            #Copy ops.npy
+            ops_src = os.path.join(self.plane_data[plane]["folder"], "ops.npy")
             ops_dest = os.path.join(plane_folder, "ops.npy")
+            try:
+                shutil.copy(ops_src, ops_dest)
+                print(f"[DEBUG] Copied ops.npy from {ops_src} to {ops_dest}", flush=True)
+                with open(log_file, "a") as log:
+                    log.write(f"Copied ops.npy from {ops_src} to {ops_dest}\n")
+            except Exception as e:
+                print(f"[DEBUG] Error copying ops.npy for plane {plane}: {e}", flush=True)
+                with open(log_file, "a") as log:
+                    log.write(f"Error copying ops.npy for plane {plane}: {e}\n")
+            #Loading copied ops.npy
             try:
                 ops = np.load(ops_dest, allow_pickle=True).item()
                 print(f"[DEBUG] Loaded copied ops.npy for plane {plane}", flush=True)
