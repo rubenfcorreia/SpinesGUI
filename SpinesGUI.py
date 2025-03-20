@@ -960,7 +960,6 @@ class MainWindow(QMainWindow):
         if self.plane_order:
             plane_num = self.plane_order[self.current_plane_index]
             plane = self.plane_data[plane_num]
-            print(plane)
             if self.current_view == "Max Projection" and "max_proj" in plane:
                 # Use the max projection from the ops.
                 mproj = plane["max_proj"]
