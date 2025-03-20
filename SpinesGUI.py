@@ -828,14 +828,18 @@ class MainWindow(QMainWindow):
         self.view_button_group = QButtonGroup(self)
         self.radio_mean = QRadioButton("Mean Image")
         self.radio_mean_enhanced = QRadioButton("Mean Image Enhanced")
+        self.radio_max = QRadioButton("Max Projection")  # New radio button for max projection.
         self.radio_mean.setChecked(True)  # Default selection.
         self.view_button_group.addButton(self.radio_mean, 0)
         self.view_button_group.addButton(self.radio_mean_enhanced, 1)
+        self.view_button_group.addButton(self.radio_max, 2)
         self.radio_mean.toggled.connect(self.update_view)
         self.radio_mean_enhanced.toggled.connect(self.update_view)
+        self.radio_max.toggled.connect(self.update_view)
         view_layout = QHBoxLayout()
         view_layout.addWidget(self.radio_mean)
         view_layout.addWidget(self.radio_mean_enhanced)
+        view_layout.addWidget(self.radio_max)
         view_layout.addStretch()
         self.coord_label = QLabel("X : Out of range\nY : Out of range")
         self.coord_label.setAlignment(Qt.AlignRight | Qt.AlignBottom)
@@ -940,24 +944,47 @@ class MainWindow(QMainWindow):
             print("[DEBUG] ROI file not found at", rois_file, flush=True)
 
     def update_view(self):
-        # Determine the current view based on which radio button is checked.
+        # Determine the current view based on the selected radio button.
         if self.radio_mean.isChecked():
             self.current_view = "Mean Image"
-        else:
+        elif self.radio_mean_enhanced.isChecked():
             self.current_view = "Mean Image Enhanced"
+        elif self.radio_max.isChecked():
+            self.current_view = "Max Projection"
+        else:
+            self.current_view = "Mean Image"  # default fallback
+
         print(f"[DEBUG] Current view: {self.current_view}", flush=True)
-        # Update self.current_meanImg based on the selected view and current plane.
+        
+        # Update the current_meanImg based on the selected view.
         if self.plane_order:
             plane_num = self.plane_order[self.current_plane_index]
             plane = self.plane_data[plane_num]
-            if self.current_view == "Mean Image Enhanced" and plane.get("meanImgE") is not None:
+            print(plane)
+            if self.current_view == "Max Projection" and "max_proj" in plane:
+                # Use the max projection from the ops.
+                mproj = plane["max_proj"]
+                mimg1 = np.percentile(mproj, 1)
+                mimg99 = np.percentile(mproj, 99)
+                mproj_norm = (mproj - mimg1) / (mimg99 - mimg1)
+                # Create a full–sized blank image and insert mproj_norm.
+                
+                self.current_meanImg = np.zeros((plane["Ly"], plane["Lx"]), np.float32)
+                try:
+                    self.current_meanImg[plane["yrange"][0]:plane["yrange"][1],
+                                        plane["xrange"][0]:plane["xrange"][1]] = mproj_norm
+                except Exception as e:
+                    print("[DEBUG] Error setting max projection region:", e, flush=True)
+                    self.current_meanImg = mproj_norm  # Fallback
+            elif self.current_view == "Mean Image Enhanced" and "meanImgE" in plane:
                 self.current_meanImg = plane["meanImgE"]
             else:
+                # Default to Mean Image.
                 self.current_meanImg = plane["meanImg"]
-        # Preserve the current transformation and update the contrast.
-        current_transform = self.view.transform()
+                print("[DEBUG] No 'max_proj' was found in the ops.npy. Defaulting to Mean Image")
+        
+        # Call update_contrast to refresh the displayed image.
         self.update_contrast()
-        self.view.setTransform(current_transform)
 
     def update_contrast(self):
         if self.current_meanImg is None:
@@ -987,6 +1014,7 @@ class MainWindow(QMainWindow):
             self.image_pixmap_item = QGraphicsPixmapItem(pixmap)
             self.image_pixmap_item.setZValue(0)  # Ensure it is at the back so that ROI items (with higher Z) show on top.
             self.graphics_scene.addItem(self.image_pixmap_item)
+
     def load_suite2p_folder(self):
         print("[DEBUG] Entering load_suite2p_folder()", flush=True)
         folder = QFileDialog.getExistingDirectory(self, "Select Root Folder", os.getcwd())
@@ -1016,13 +1044,16 @@ class MainWindow(QMainWindow):
                         ops = np.load(ops_file, allow_pickle=True).item()
                         meanImg = ops.get("meanImg", None)
                         meanImgE = ops.get("meanImgE", None)
+                        max_proj = ops.get("max_proj", None)
                         yrange = ops.get("yrange", None)
                         xrange_ = ops.get("xrange", None)
+                        Ly = ops.get("Ly")
+                        Lx = ops.get("Lx")
                         if meanImg is None or yrange is None or xrange_ is None:
                             continue
                         if np.isnan(meanImg).any():
                             continue
-                        self.plane_data[plane_num] = {"meanImg": meanImg, "meanImgE": meanImgE, "yrange": yrange, "xrange": xrange_, "folder": subfolder}
+                        self.plane_data[plane_num] = {"meanImg": meanImg, "meanImgE": meanImgE, "yrange": yrange, "xrange": xrange_, "folder": subfolder,"max_proj": max_proj,"Ly" : Ly , "Lx" : Lx }
                         self.plane_order.append(plane_num)
                     except Exception as e:
                         print(f"[DEBUG] Error loading ops.npy in {subfolder}: {e}")
