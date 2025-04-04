@@ -1638,6 +1638,11 @@ class MainWindow(QMainWindow):
                     log.write("Extraction wrapper printed:\n" + extraction_printed + "\n")
                 
                 stat_out, F, Fneu, F_chan2, Fneu_chan2 = outputs
+                np.save(os.path.join(plane_folder, "stat.npy"), stat_out)
+                np.save(os.path.join(plane_folder, "F.npy"), F)
+                np.save(os.path.join(plane_folder, "Fneu.npy"), Fneu)
+                np.save(os.path.join(plane_folder, "F_chan2.npy"), F_chan2)
+                np.save(os.path.join(plane_folder, "Fneu_chan2.npy"), Fneu_chan2)
                 with open(log_file, "a") as log:
                     log.write(f"Extraction complete for plane {plane}.\n")
             except Exception as e:
