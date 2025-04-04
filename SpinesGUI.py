@@ -6,7 +6,7 @@ PyQt5 GUI for selecting, labeling, and extracting ROIs from Suite2p output.
 Features:
   • Loads both the original mean image (meanImg) and an enhanced version (meanImgE) from ops.npy.
   • Displays a yellow valid ROI border (using yrange/xrange from ops.npy).
-  • Full-screen view with mouse–wheel zooming (100%–500%) and panning.
+  • Full-screen view with mouse–wheel zooming (100%–700%) and panning.
   • Shows mouse coordinates in the bottom–right.
   • ROI drawing via rectangle, regular polygon, or tracing (with vertex markers of radius 1).
   • Right–click on ROIs to edit or delete (with associated ROI deletion).
@@ -326,9 +326,9 @@ class CustomGraphicsView(QGraphicsView):
         if new_scale < 1.0:
             factor = 1.0/self.current_scale
             self.current_scale = 1.0
-        elif new_scale > 5.0:
-            factor = 5.0/self.current_scale
-            self.current_scale = 5.0
+        elif new_scale > 7.0:
+            factor = 7.0/self.current_scale
+            self.current_scale = 7.0
         else:
             self.current_scale = new_scale
         self.scale(factor, factor)
