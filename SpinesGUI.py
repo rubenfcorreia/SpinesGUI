@@ -1476,9 +1476,9 @@ class MainWindow(QMainWindow):
                         log.write(f"Error copying data.bin for plane {plane}: {e}\n")
                     continue
             elif not os.path.exists(data_success_file):
-                print(f"[DEBUG] There was an error copying data.bin for plane {plane}: {e}", flush=True)
+                print(f"[DEBUG] There was an error copying data.bin for plane {plane}", flush=True)
                 with open(log_file, "a") as log:
-                    log.write(f"There was an error copying data.bin for plane {plane}: {e}\n")
+                    log.write(f"There was an error copying data.bin for plane {plane}\n")
                     try:
                         #shutil.copy(data_bin_src, data_bin_dest)
                         with open(data_bin_src, 'rb') as fsrc, open(data_bin_dest, 'wb') as fdst:
@@ -1520,9 +1520,9 @@ class MainWindow(QMainWindow):
                         with open(log_file, "a") as log:
                             log.write(f"Created extraction success file at {data_chan2_success_file}\n")
                     except Exception as e:
-                        print(f"[DEBUG] Error copying data_chan2.bin for plane {plane}: {e}", flush=True)
+                        print(f"[DEBUG] Error copying data_chan2.bin for plane {plane}", flush=True)
                         with open(log_file, "a") as log:
-                            log.write(f"Error copying data_chan2.bin for plane {plane}: {e}\n")
+                            log.write(f"Error copying data_chan2.bin for plane {plane}\n")
                         data_chan2_dest = None
                 elif not os.path.exists(data_chan2_success_file):
                     print(f"[DEBUG] There was an error copying data.bin for plane {plane}: {e}", flush=True)
