@@ -235,47 +235,69 @@ class ROIItem(QGraphicsPolygonItem):
                 new_poly = QPolygonF([QPointF(x,y) for x,y in new_pts])
                 self.setPolygon(new_poly)
                 self.update_vertex_markers()
+                
     def delete_roi(self):
         assoc_ids = []
         typ = self.roi_info["roi-type"][0]
+
+        # ---- normal mode unchanged ----
         if self.main_window.mode == "normal":
             cellID = self.roi_info["roi-type"][1]
-            if typ == 0:
+            if typ == 0:  # deleting a Cell: remove all its dendrites & spines
                 for rid, info in self.main_window.roi_data.items():
                     if rid == self.roi_id:
                         continue
                     rtype, cid, pid, sid = info["roi-type"]
                     if cid == cellID:
                         assoc_ids.append(rid)
-            elif typ == 1:
+            elif typ == 1:  # deleting a dendrite: remove its spines
                 for rid, info in self.main_window.roi_data.items():
                     if rid == self.roi_id:
                         continue
                     rtype, cid, pid, sid = info["roi-type"]
                     if rtype == 2 and cid == cellID and pid == self.roi_info["roi-type"][2]:
                         assoc_ids.append(rid)
+
+        # ---- dendrites/axons mode ----
         else:
-            if typ == 1:
+            if typ == 0:
+                # deleting Parent Dendrite: remove all its Dendritic Spines
                 parent_dend_id = self.roi_info["roi-type"][1]
                 for rid, info in self.main_window.roi_data.items():
                     if rid == self.roi_id:
                         continue
+                    # child spines have type==1 and same parent_dend_id
                     if info["roi-type"][0] == 1 and info["roi-type"][1] == parent_dend_id:
                         assoc_ids.append(rid)
-            elif typ == 3:
+
+            elif typ == 2:
+                # deleting Parent Axon: remove all its Axonal Boutons
                 parent_axon_id = self.roi_info["roi-type"][3]
                 for rid, info in self.main_window.roi_data.items():
                     if rid == self.roi_id:
                         continue
+                    # child boutons have type==3 and same parent_axon_id
                     if info["roi-type"][0] == 3 and info["roi-type"][3] == parent_axon_id:
                         assoc_ids.append(rid)
+
+            # typ == 1 (spine) or typ == 3 (bouton): no other ROIs to delete
+
+        # if there are any associated ROIs, ask before mass‐deleting
         if assoc_ids:
-            confirm = QMessageBox.question(None, "Delete ROI", "Deleting this ROI will also delete its associated ROIs.\nProceed?", QMessageBox.Yes | QMessageBox.No)
+            confirm = QMessageBox.question(
+                None,
+                "Delete ROI",
+                "Deleting this ROI will also delete its associated ROIs.\nProceed?",
+                QMessageBox.Yes | QMessageBox.No
+            )
             if confirm != QMessageBox.Yes:
                 return
             for rid in assoc_ids:
                 self.main_window.remove_roi(rid)
+
+        # finally delete this ROI itself
         self.main_window.remove_roi(self.roi_id)
+
     def mousePressEvent(self, event):
         pos = event.pos()
         poly = self.polygon()
