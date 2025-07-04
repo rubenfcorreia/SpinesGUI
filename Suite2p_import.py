@@ -8,8 +8,8 @@ from matplotlib import pyplot as plt
 
 
 userID = 'rubencorreia'
-expID = '2025-01-31_07_ESRC004' 
-plane = "plane0"
+expID = '2025-07-01_01_ESRC008' 
+plane = "plane2"
 # the organise_paths.find_paths(userID, expID) gives you various useful
 # paths based on an experiment ID
 animalID, remote_repository_root, processed_root, exp_dir_processed, exp_dir_raw = organise_paths.find_paths(userID, expID)
@@ -34,9 +34,25 @@ print(cell)
 
 ops_file = os.path.join(exp_plane,('ops.npy'))
 ops = np.load(ops_file, allow_pickle=True).item()
+print("Loaded ops file")
+print(ops)
+print('Finished printing ops file')
+
 meanImg = ops.get("meanImg", None)
 batch_size = ops.get("batch_size", None)
 print(batch_size)
 print(ops.get("diameter"))
+
+print()
+print(f'Inserted path {exp_plane}')
+print(f"Path for the bin file {ops['reg_file']}")
+print(f"Number of frames {ops['nframes']}")
+
+size_bytes = os.path.getsize(ops['reg_file'])
+Ly, Lx = ops['Ly'], ops['Lx']
+expected_frame_size = Ly * Lx * np.dtype('float32').itemsize
+expected_frames = size_bytes // expected_frame_size
+print(f"File has {expected_frames} frames")
+
 plt.imshow(meanImg)
 plt.show()
