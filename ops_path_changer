@@ -1,0 +1,58 @@
+
+import os
+import shutil
+import numpy as np
+import organise_paths
+import glob
+
+# This script is used to change the ops_path in the ops.npy file
+# It is useful when you have moved the ops.npy file to a different location
+userID = 'rubencorreia'
+expID = '2025-07-01_01_ESRC008' 
+
+# the organise_paths.find_paths(userID, expID) gives you various useful
+# paths based on an experiment ID
+animalID, remote_repository_root, processed_root, exp_dir_processed, exp_dir_raw = organise_paths.find_paths(userID, expID)
+# os.path.join combined strings to make a path that will work on whatever 
+# operating system the function is run on
+root = os.path.join(exp_dir_processed,'suite2p','SpinesGUI')
+
+all_matching_items = glob.glob(os.path.join(root, '*plane*'))
+
+planes_list = [item for item in all_matching_items if os.path.isdir(item)]
+print(f"[DEBUG] Found {len(planes_list)} planes in {root}", flush=True)
+
+for plane in planes_list:
+    # If you have multiple planes, you can loop through them
+    # and change the ops_path for each plane
+    print(f"[DEBUG] Processing {plane}", flush=True)
+    # Ensure the plane is a directory
+    if not os.path.isdir(plane):
+        print(f"[ERROR] {plane} is not a directory. Skipping.", flush=True)
+        continue
+    # Get the plane name from the path
+    plane_name = os.path.basename(plane)
+    print(f"[DEBUG] Found plane: {plane_name}", flush=True)
+    plane_folder = os.path.join(root, plane_name)
+    ops_dest = os.path.join(plane_folder, 'ops.npy')
+    ops = np.load(ops_dest, allow_pickle=True).item()
+
+    # Make sure ops_path points at the new copy
+    ops["ops_path"] = ops_dest
+
+    # If your registration stage uses keys like "reg_file" / "reg_file_chan2", rebase them too:
+    if "reg_file" in ops:
+        ops["reg_file"] = os.path.join(plane_folder, os.path.basename(ops["reg_file"]))
+        print(f"[DEBUG] Patched ops['reg_file'] → {ops['reg_file']}", flush=True)
+
+    if "reg_file_chan2" in ops:
+        ops["reg_file_chan2"] = os.path.join(plane_folder, os.path.basename(ops["reg_file_chan2"]))
+        print(f"[DEBUG] Patched ops['reg_file_chan2'] → {ops['reg_file_chan2']}", flush=True)
+
+    # Save the modified ops
+    np.save(ops_dest, ops)
+    print(f"[DEBUG] Overwrote ops.npy with patched paths for {plane_name}", flush=True)
+#Finished
+print(f"[DEBUG] Finished processing all planes in {root}", flush=True)
+print(f"[DEBUG] All ops.npy files have been updated with the new ops_path.", flush=True)
+print(f"[DEBUG] You can now run the Suite2p GUI with the updated ops.npy files.", flush=True)
