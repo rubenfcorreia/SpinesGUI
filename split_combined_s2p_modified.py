@@ -29,6 +29,10 @@ def split_combined_suite2p():
         if not os.path.exists(suite2p_combined_path):
             # Rename the suite2p folder in the first experiment's folder
             os.rename(suite2p_path, suite2p_combined_path)
+            #Fixing the ops file on the suite2p_combined folder
+            print('Patching ops file from suite2p_combined folder...')
+            patch_all_ops_paths(userID, expID)
+            print('Done patching ops file.')
 
         planes_list = glob.glob(os.path.join(suite2p_combined_path, '*plane*'))
         # determine all experiment IDs that have been combined
@@ -119,11 +123,6 @@ def split_combined_suite2p():
                 split_s2p_vid(path_to_source_bin,path_to_dest_bin,frameSize,frames_to_copy,F.shape[1]);
                 print('Done splitting binary file.')
 
-                #Fixing the ops file on the suite2p_combined folder
-                print('Patching ops file from suite2p_combined folder...')
-                patch_all_ops_paths(userID, expID)
-                print('Done patching ops file.')
-
                 # sort out permissions
             for iExp in range(len(expIDs)):
                 expID = expIDs[iExp]
@@ -205,7 +204,7 @@ def patch_all_ops_paths(userID, expID):
 
     for ops_path in ops_files:
         folder = os.path.dirname(ops_path)
-        print(f"Patching {ops_path!r}…")
+        #print(f"Patching {ops_path!r}…")
         ops = np.load(ops_path, allow_pickle=True).item()
 
         # reset the ops_path
@@ -220,7 +219,7 @@ def patch_all_ops_paths(userID, expID):
                 print(f"  • {key}: {old!r} → {new!r}")
 
         np.save(ops_path, ops)
-        print(f"  ✔ saved patched ops.npy")
+        #print(f"  ✔ saved patched ops.npy")
 
     print("All ops.npy files have been updated.")
 
