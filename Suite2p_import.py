@@ -15,7 +15,7 @@ plane = "plane2"
 animalID, remote_repository_root, processed_root, exp_dir_processed, exp_dir_raw = organise_paths.find_paths(userID, expID)
 # os.path.join combined strings to make a path that will work on whatever 
 # operating system the function is run on
-suite2p_folder = os.path.join(exp_dir_processed,'suite2p')
+suite2p_folder = os.path.join(exp_dir_processed,'suite2p_combined')
 print(os.listdir(suite2p_folder))
 exp_plane = os.path.join(suite2p_folder, plane)
 
