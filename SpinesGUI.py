@@ -379,7 +379,7 @@ class CustomGraphicsView(QGraphicsView):
                     tracing_color = QColor(255, 0, 255, 64)
                     self.parent_window.tracing_polygon_item.setPen(QPen(tracing_color, 2, Qt.DashLine))
                     self.scene().addItem(self.parent_window.tracing_polygon_item)
-                    r = 1
+                    r = 0.5
                     marker = QGraphicsEllipseItem(QRectF(scene_pos.x()-r, scene_pos.y()-r, 2*r, 2*r))
                     marker.setBrush(QBrush(QColor("red")))
                     marker.setPen(QPen(Qt.black))
@@ -1582,6 +1582,20 @@ class MainWindow(QMainWindow):
                 print(f"[DEBUG] Copied ops.npy from {ops_src} to {ops_dest}", flush=True)
                 with open(log_file, "a") as log:
                     log.write(f"Copied ops.npy from {ops_src} to {ops_dest}\n")
+                # Load the ops file to modify paths
+                print(f"[DEBUG] Loading ops.npy from {ops_dest}", flush=True)
+                ops = np.load(ops_dest, allow_pickle=True).item()
+                # Modify paths in ops
+                ops["ops_path"] = ops_dest
+                if "reg_file" in ops:
+                    ops["reg_file"] = os.path.join(plane_folder, os.path.basename(ops["reg_file"]))
+                    print(f"[DEBUG] Patched ops['reg_file'] → {ops['reg_file']}", flush=True)
+                if "reg_file_chan2" in ops:
+                    ops["reg_file_chan2"] = os.path.join(plane_folder, os.path.basename(ops["reg_file_chan2"]))
+                    print(f"[DEBUG] Patched ops['reg_file_chan2'] → {ops['reg_file_chan2']}", flush=True)
+                # Save the modified ops right back over the copy
+                np.save(ops_dest, ops)
+                print(f"[DEBUG] Overwrote ops.npy with patched paths", flush=True)
             except Exception as e:
                 print(f"[DEBUG] Error copying ops.npy for plane {plane}: {e}", flush=True)
                 with open(log_file, "a") as log:
