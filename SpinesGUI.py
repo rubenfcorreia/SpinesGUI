@@ -1501,23 +1501,23 @@ class MainWindow(QMainWindow):
                 print(f"[DEBUG] There was an error copying data.bin for plane {plane}", flush=True)
                 with open(log_file, "a") as log:
                     log.write(f"There was an error copying data.bin for plane {plane}\n")
-                    try:
-                        #shutil.copy(data_bin_src, data_bin_dest)
-                        with open(data_bin_src, 'rb') as fsrc, open(data_bin_dest, 'wb') as fdst:
-                            shutil.copyfileobj(fsrc, fdst, length=16 * 1024)
-                        print(f"[DEBUG] Copied data.bin from {data_bin_src} to {data_bin_dest}", flush=True)
-                        with open(log_file, "a") as log:
-                            log.write(f"Copied data.bin from {data_bin_src} to {data_bin_dest}\n")
-                        with open(data_success_file, "w") as dsf:
-                            dsf.write(f"Successfuly copied data.bin from plane {plane}.\n")
-                            print(f"[DEBUG] Created data.bin copy success file at {data_success_file}", flush=True)
-                        with open(log_file, "a") as log:
-                            log.write(f"Created extraction success file at {data_success_file}\n")
-                    except Exception as e:
-                        print(f"[DEBUG] Error copying data.bin for plane {plane}: {e}", flush=True)
-                        with open(log_file, "a") as log:
-                            log.write(f"Error copying data.bin for plane {plane}: {e}\n")
-                        continue
+                try:
+                    #shutil.copy(data_bin_src, data_bin_dest)
+                    with open(data_bin_src, 'rb') as fsrc, open(data_bin_dest, 'wb') as fdst:
+                        shutil.copyfileobj(fsrc, fdst, length=16 * 1024)
+                    print(f"[DEBUG] Copied data.bin from {data_bin_src} to {data_bin_dest}", flush=True)
+                    with open(log_file, "a") as log:
+                        log.write(f"Copied data.bin from {data_bin_src} to {data_bin_dest}\n")
+                    with open(data_success_file, "w") as dsf:
+                        dsf.write(f"Successfuly copied data.bin from plane {plane}.\n")
+                        print(f"[DEBUG] Created data.bin copy success file at {data_success_file}", flush=True)
+                    with open(log_file, "a") as log:
+                        log.write(f"Created extraction success file at {data_success_file}\n")
+                except Exception as e:
+                    print(f"[DEBUG] Error copying data.bin for plane {plane}: {e}", flush=True)
+                    with open(log_file, "a") as log:
+                        log.write(f"Error copying data.bin for plane {plane}: {e}\n")
+                    continue
             else:
                 print(f"[DEBUG] data.bin already exists in {plane_folder} and was copied correctly", flush=True)
                 with open(log_file, "a") as log:
@@ -1547,26 +1547,26 @@ class MainWindow(QMainWindow):
                             log.write(f"Error copying data_chan2.bin for plane {plane}\n")
                         data_chan2_dest = None
                 elif not os.path.exists(data_chan2_success_file):
-                    print(f"[DEBUG] There was an error copying data.bin for plane {plane}: {e}", flush=True)
+                    print(f"[DEBUG] There was an error copying data_chan2.bin for plane {plane}:", flush=True)
                     with open(log_file, "a") as log:
-                        log.write(f"There was an error copying data.bin for plane {plane}: {e}\n")
-                        try:
-                            #shutil.copy(data_bin_src, data_bin_dest)
-                            with open(data_bin_src, 'rb') as fsrc, open(data_bin_dest, 'wb') as fdst:
-                                shutil.copyfileobj(fsrc, fdst, length=16 * 1024)
-                            print(f"[DEBUG] Copied data.bin from {data_bin_src} to {data_bin_dest}", flush=True)
-                            with open(log_file, "a") as log:
-                                log.write(f"Copied data.bin from {data_bin_src} to {data_bin_dest}\n")
-                            with open(data_chan2_success_file, "w") as dsf:
-                                dsf.write(f"Successfuly copied data_chan2.bin from plane {plane}.\n")
-                                print(f"[DEBUG] Created data_chan2.bin copy success file at {data_chan2_success_file}", flush=True)
-                            with open(log_file, "a") as log:
-                                log.write(f"Created extraction success file at {success_file}\n")
-                        except Exception as e:
-                            print(f"[DEBUG] Error copying data_chan2.bin for plane {plane}: {e}", flush=True)
-                            with open(log_file, "a") as log:
-                                log.write(f"Error copying data_chan2.bin for plane {plane}: {e}\n")
-                            continue
+                        log.write(f"There was an error copying data_chan2.bin for plane {plane}:\n")
+                    try:
+                        #shutil.copy(data_bin_src, data_bin_dest)
+                        with open(data_bin_src, 'rb') as fsrc, open(data_bin_dest, 'wb') as fdst:
+                            shutil.copyfileobj(fsrc, fdst, length=16 * 1024)
+                        print(f"[DEBUG] Copied data_chan2.bin from {data_bin_src} to {data_bin_dest}", flush=True)
+                        with open(log_file, "a") as log:
+                            log.write(f"Copied data_chan2.bin from {data_bin_src} to {data_bin_dest}\n")
+                        with open(data_chan2_success_file, "w") as dsf:
+                            dsf.write(f"Successfuly copied data_chan2.bin from plane {plane}.\n")
+                            print(f"[DEBUG] Created data_chan2.bin copy success file at {data_chan2_success_file}", flush=True)
+                        with open(log_file, "a") as log:
+                            log.write(f"Created extraction success file at {success_file}\n")
+                    except Exception as e:
+                        print(f"[DEBUG] Error copying data_chan2.bin for plane {plane}: {e}", flush=True)
+                        with open(log_file, "a") as log:
+                            log.write(f"Error copying data_chan2.bin for plane {plane}: {e}\n")
+                        continue
                 else:
                     print(f"[DEBUG] data_chan2.bin already exists in {plane_folder} and was copied correctly", flush=True)
                     with open(log_file, "a") as log:
