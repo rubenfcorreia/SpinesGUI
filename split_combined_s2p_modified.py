@@ -63,10 +63,12 @@ def split_combined_suite2p():
                 frames_in_exp = combined_ops['frames_per_folder'][iExp]
                 # calculate which frame in the combined data is the first from this experiment
                 exp_start_frame = np.sum(combined_ops['frames_per_folder'][0:iExp]).astype(int)
+                # define which frame is the last frame from this experiment
+                exp_end_frame = exp_start_frame + frames_in_exp - 1
                 # select frames that come from this experiment
-                F_exp = F[:,exp_start_frame:exp_start_frame+frames_in_exp-1]
-                Fneu_exp = Fneu[:,exp_start_frame:exp_start_frame+frames_in_exp-1]
-                spks_exp = spks[:,exp_start_frame:exp_start_frame+frames_in_exp-1]
+                F_exp = F[:,exp_start_frame:exp_end_frame]
+                Fneu_exp = Fneu[:,exp_start_frame:exp_end_frame]
+                spks_exp = spks[:,exp_start_frame:exp_end_frame]
                 # save to experiment directory
                 animalID2, remote_repository_root2, \
                     processed_root2, exp_dir_processed2, \
@@ -93,7 +95,7 @@ def split_combined_suite2p():
                 path_to_source_bin = os.path.join(exp_dir_processed,'suite2p_combined','plane'+str(iPlane),'data.bin')
                 path_to_dest_bin = os.path.join(exp_dir_processed2,'suite2p','plane'+str(iPlane),'data.bin')
                 frameSize = combined_ops['meanImg'].shape
-                frames_to_copy = range(exp_start_frame,exp_start_frame+frames_in_exp-1)
+                frames_to_copy = range(exp_start_frame,exp_end_frame)
 
                 #Changing the paths and frame details in the splited ops.file
                 print('Updating ops file...')
@@ -113,6 +115,33 @@ def split_combined_suite2p():
                 ops['filelist'] = filtered_files
                 ops['frames_per_file'] = filtered_frames
                 ops['nframes'] = sum(filtered_frames)
+
+                #Slice motion offsets to the experiment frames
+                combined_nframes = F.shape[1]  # frames in the combined run
+
+                # rigid (1D)
+                if 'yoff' in ops and ops['yoff'] is not None:
+                    ops['yoff'] = ops['yoff'][exp_start_frame:exp_end_frame]
+
+                if 'xoff' in ops and ops['xoff'] is not None:
+                    ops['xoff'] = ops['xoff'][exp_start_frame:exp_end_frame]
+
+                # non-rigid (2D) — detect which axis is frames
+                if 'yoff1' in ops and ops['yoff1'] is not None:
+                    a = np.asarray(ops['yoff1'])
+                    if a.ndim == 2:
+                        if a.shape[1] == combined_nframes:      # (blocks, frames)
+                            ops['yoff1'] = a[:, exp_start_frame:exp_end_frame]
+                        elif a.shape[0] == combined_nframes:    # (frames, blocks)
+                            ops['yoff1'] = a[exp_start_frame:exp_end_frame, :]
+
+                if 'xoff1' in ops and ops['xoff1'] is not None:
+                    a = np.asarray(ops['xoff1'])
+                    if a.ndim == 2:
+                        if a.shape[1] == combined_nframes:
+                            ops['xoff1'] = a[:, exp_start_frame:exp_end_frame]
+                        elif a.shape[0] == combined_nframes:
+                            ops['xoff1'] = a[exp_start_frame:exp_end_frame, :]
 
                 #Saving the updated ops file
                 np.save(os.path.join(exp_dir_processed2,'suite2p','plane'+str(iPlane),'ops.npy'),ops)
