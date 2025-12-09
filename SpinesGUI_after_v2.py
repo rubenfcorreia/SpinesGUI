@@ -78,9 +78,14 @@ def patch_all_ops_paths(userID, expID):
 def main():
     userID = 'rubencorreia'
     expID  = '2025-11-11_01_ESRC022'  # or your combined experiment ID
+    combined = True
     move_original_suite2p_files(userID, expID)
     patch_all_ops_paths(userID, expID)
-    split_combined_suite2p_v2(userID, expID)
-    print("🎉 All done! You can now run Suite2p GUI with every ops.npy correctly patched and every expID separated.")
+    if combined:
+        split_combined_suite2p_v2(userID, expID)
+        print("🎉 All done! You can now run Suite2p GUI with every ops.npy correctly patched and every expID separated.")
+    else:
+        print("🎉 All done! You can now run Suite2p GUI with every ops.npy correctly patched")
+
 if __name__ == '__main__':
     main()
