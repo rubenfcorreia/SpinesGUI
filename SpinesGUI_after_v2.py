@@ -3,6 +3,7 @@ import glob
 import shutil
 import numpy as np
 import organise_paths
+from split_combined_s2p_modified import split_combined_suite2p_v2
 
 def move_original_suite2p_files(userID, expID):
     """
@@ -76,10 +77,10 @@ def patch_all_ops_paths(userID, expID):
 
 def main():
     userID = 'rubencorreia'
-    expID  = '2025-07-01_01_ESRC008'  # or your combined experiment ID
+    expID  = '2025-11-11_01_ESRC022'  # or your combined experiment ID
     move_original_suite2p_files(userID, expID)
     patch_all_ops_paths(userID, expID)
-    print("🎉 All done! You can now run Suite2p GUI with every ops.npy correctly patched.")
-
+    split_combined_suite2p_v2(userID, expID)
+    print("🎉 All done! You can now run Suite2p GUI with every ops.npy correctly patched and every expID separated.")
 if __name__ == '__main__':
     main()

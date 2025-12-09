@@ -6,9 +6,7 @@ import numpy as np
 import shutil
 import grp
 
-def split_combined_suite2p():
-    userID = 'rubencorreia'
-    expID  = '2025-07-01_01_ESRC008'    # <--- put the first experiment of the sequence here
+def split_combined_suite2p_v2(userID, expID):
     animalID, remote_repository_root, \
         processed_root, exp_dir_processed, \
             exp_dir_raw = organise_paths.find_paths(userID, expID)
@@ -253,4 +251,6 @@ def patch_all_ops_paths(userID, expID):
     print("All ops.npy files have been updated.")
 
 if __name__ == "__main__":
-    split_combined_suite2p()
+    userID = 'rubencorreia'
+    expID  = '2025-11-11_01_ESRC022'    # <--- put the first experiment of the sequence here
+    split_combined_suite2p_v2(userID, expID)
