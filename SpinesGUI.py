@@ -1393,436 +1393,49 @@ class MainWindow(QMainWindow):
             event.accept()
         else:
             event.ignore()
+
     def extract_rois(self):
-        print("[DEBUG] Starting extraction process", flush=True)
         if self.root_folder is None:
             QMessageBox.warning(self, "Error", "No root folder loaded.")
             return
 
         spines_gui_folder = os.path.join(self.root_folder, "SpinesGUI")
-        if not os.path.exists(spines_gui_folder):
-            os.makedirs(spines_gui_folder)
+        os.makedirs(spines_gui_folder, exist_ok=True)
 
-        # Define log and success file paths.
-        log_file = os.path.join(spines_gui_folder, "extraction_log.txt")
+        # Decide if re-extraction based on stat1 presence (same logic)
         success_file = os.path.join(spines_gui_folder, "extraction_successfull.txt")
+        reextract = os.path.exists(success_file)
 
-        # Open (or create) the extraction log file for appending.
-        with open(log_file, "a") as log:
-            log.write("Extraction process started\n")
-
-        # Check if re-extraction is needed (based on presence of stat1 file).
-        reextract = False
-        for plane in self.plane_data.keys():
-            plane_folder = os.path.join(spines_gui_folder, f"plane{plane}")
-            stat1_filename = "stat1.npy" if self.mode == "normal" else "stat1_dendrite_axon_mode.npy"
-            stat1_file = os.path.join(plane_folder, stat1_filename)
-            if os.path.exists(stat1_file):
-                reextract = True
-                break
-
-        # If reextracting, build the confirmation message based on whether the previous extraction was successful.
+        force = False
         if reextract:
-            if os.path.exists(success_file):
-                msg = ("Previous extraction was successful. "
-                    "Do you want to re-run extraction? This will delete previous extraction files "
-                    "(except data.bin, data_chan2.bin, and logs).")
-            else:
-                msg = ("Previous extraction was not successful or not completed. "
-                    "Do you want to re-run extraction? This will delete previous extraction files "
-                    "(except data.bin, data_chan2.bin, and logs).")
-            confirm = QMessageBox.question(self, "Re-run Extraction", msg,
-                                        QMessageBox.Yes | QMessageBox.No)
-            if confirm != QMessageBox.Yes:
+            success_file = os.path.join(spines_gui_folder, "extraction_successfull.txt")
+            msg = ("Previous extraction was successful. " if os.path.exists(success_file)
+                else "Previous extraction was not successful or not completed. ")
+            msg += "Do you want to re-run extraction? This will overwrite previous extraction outputs."
+            if QMessageBox.question(self, "Re-run Extraction", msg, QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
                 return
-            # Delete extraction files for each plane (except data.bin, data_chan2.bin, and logs).
-            for plane in self.plane_data.keys():
-                plane_folder = os.path.join(spines_gui_folder, f"plane{plane}")
-                for fname in ["stat0.npy", "stat1.npy", "stat.npy", "F.npy", "Fneu.npy",
-                            "F_chan2.npy", "Fneu_chan2.npy", "spks.npy", "iscell.npy",
-                            "stat0_dendrite_axon_mode.npy", "stat1_dendrite_axon_mode.npy"]:
-                    fpath = os.path.join(plane_folder, fname)
-                    if os.path.exists(fpath):
-                        try:
-                            os.remove(fpath)
-                            print(f"[DEBUG] Deleted {fpath}", flush=True)
-                            with open(log_file, "a") as log:
-                                log.write(f"Deleted {fpath}\n")
-                        except Exception as e:
-                            print(f"[DEBUG] Error deleting {fpath}: {e}", flush=True)
-                            with open(log_file, "a") as log:
-                                log.write(f"Error deleting {fpath}: {e}\n")
-            # Also delete the log files themselves.
-            for fname in ["extraction_log.txt", "extraction_successfull.txt"]:
-                fpath = os.path.join(spines_gui_folder, fname)
-                if os.path.exists(fpath):
-                    try:
-                        os.remove(fpath)
-                        print(f"[DEBUG] Deleted log file {fpath}", flush=True)
-                        with open(log_file, "a") as log:
-                            log.write(f"Deleted log file {fpath}\n")
-                    except Exception as e:
-                        print(f"[DEBUG] Error deleting log file {fpath}: {e}", flush=True)
-                        with open(log_file, "a") as log:
-                            log.write(f"Error deleting log file {fpath}: {e}\n")
+            force = True
 
-        # For each plane, ensure that binary files are present.
-        for plane in self.plane_data.keys():
-            print(f"[DEBUG] Processing extraction for plane {plane}", flush=True)
-            with open(log_file, "a") as log:
-                log.write(f"Processing extraction for plane {plane}\n")
-            plane_folder = os.path.join(spines_gui_folder, f"plane{plane}")
-            if not os.path.exists(plane_folder):
-                os.makedirs(plane_folder)
-
-            # Check data.bin:
-            data_bin_src = os.path.join(self.plane_data[plane]["folder"], "data.bin")
-            data_bin_dest = os.path.join(plane_folder, "data.bin")
-            data_success_file = os.path.join(spines_gui_folder, f"data_plane{plane}_copy_success.txt")
-            if not os.path.exists(data_bin_dest):
-                try:
-                    #shutil.copy(data_bin_src, data_bin_dest)
-                    with open(data_bin_src, 'rb') as fsrc, open(data_bin_dest, 'wb') as fdst:
-                        shutil.copyfileobj(fsrc, fdst, length=16 * 1024)
-                    print(f"[DEBUG] Copied data.bin from {data_bin_src} to {data_bin_dest}", flush=True)
-                    with open(log_file, "a") as log:
-                        log.write(f"Copied data.bin from {data_bin_src} to {data_bin_dest}\n")
-                    with open(data_success_file, "w") as dsf:
-                        dsf.write(f"Successfuly copied data.bin from plane {plane}.\n")
-                        print(f"[DEBUG] Created data.bin copy success file at {data_success_file}", flush=True)
-                    with open(log_file, "a") as log:
-                        log.write(f"Created extraction success file at {success_file}\n")
-                except Exception as e:
-                    print(f"[DEBUG] Error copying data.bin for plane {plane}: {e}", flush=True)
-                    with open(log_file, "a") as log:
-                        log.write(f"Error copying data.bin for plane {plane}: {e}\n")
-                    continue
-            elif not os.path.exists(data_success_file):
-                print(f"[DEBUG] There was an error copying data.bin for plane {plane}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"There was an error copying data.bin for plane {plane}\n")
-                try:
-                    #shutil.copy(data_bin_src, data_bin_dest)
-                    with open(data_bin_src, 'rb') as fsrc, open(data_bin_dest, 'wb') as fdst:
-                        shutil.copyfileobj(fsrc, fdst, length=16 * 1024)
-                    print(f"[DEBUG] Copied data.bin from {data_bin_src} to {data_bin_dest}", flush=True)
-                    with open(log_file, "a") as log:
-                        log.write(f"Copied data.bin from {data_bin_src} to {data_bin_dest}\n")
-                    with open(data_success_file, "w") as dsf:
-                        dsf.write(f"Successfuly copied data.bin from plane {plane}.\n")
-                        print(f"[DEBUG] Created data.bin copy success file at {data_success_file}", flush=True)
-                    with open(log_file, "a") as log:
-                        log.write(f"Created extraction success file at {data_success_file}\n")
-                except Exception as e:
-                    print(f"[DEBUG] Error copying data.bin for plane {plane}: {e}", flush=True)
-                    with open(log_file, "a") as log:
-                        log.write(f"Error copying data.bin for plane {plane}: {e}\n")
-                    continue
-            else:
-                print(f"[DEBUG] data.bin already exists in {plane_folder} and was copied correctly", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"data.bin already exists in {plane_folder} and was copied correctly\n")
-
-            # Check data_chan2.bin if it exists.
-            data_chan2_src = os.path.join(self.plane_data[plane]["folder"], "data_chan2.bin")
-            data_chan2_dest = os.path.join(plane_folder, "data_chan2.bin")
-            data_chan2_success_file = os.path.join(spines_gui_folder, f"data_chan2_plane{plane}_copy_success.txt")
-            if os.path.exists(data_chan2_src):
-                if not os.path.exists(data_chan2_dest):
-                    try:
-                        #shutil.copy(data_chan2_src, data_chan2_dest)
-                        with open(data_chan2_src, 'rb') as fsrc2, open(data_chan2_dest, 'wb') as fdst2:
-                            shutil.copyfileobj(fsrc2, fdst2, length=16 * 1024)
-                        print(f"[DEBUG] Copied data_chan2.bin from {data_chan2_src} to {data_chan2_dest}", flush=True)
-                        with open(log_file, "a") as log:
-                            log.write(f"Copied data_chan2.bin from {data_chan2_src} to {data_chan2_dest}\n")
-                        with open(data_chan2_success_file, "w") as dsf:
-                            dsf.write(f"Successfuly copied data_chan2.bin from plane {plane}.\n")
-                            print(f"[DEBUG] Created data_chan2.bin copy success file at {data_chan2_success_file}", flush=True)
-                        with open(log_file, "a") as log:
-                            log.write(f"Created extraction success file at {data_chan2_success_file}\n")
-                    except Exception as e:
-                        print(f"[DEBUG] Error copying data_chan2.bin for plane {plane}", flush=True)
-                        with open(log_file, "a") as log:
-                            log.write(f"Error copying data_chan2.bin for plane {plane}\n")
-                        data_chan2_dest = None
-                elif not os.path.exists(data_chan2_success_file):
-                    print(f"[DEBUG] There was an error copying data_chan2.bin for plane {plane}:", flush=True)
-                    with open(log_file, "a") as log:
-                        log.write(f"There was an error copying data_chan2.bin for plane {plane}:\n")
-                    try:
-                        #shutil.copy(data_bin_src, data_bin_dest)
-                        with open(data_bin_src, 'rb') as fsrc, open(data_bin_dest, 'wb') as fdst:
-                            shutil.copyfileobj(fsrc, fdst, length=16 * 1024)
-                        print(f"[DEBUG] Copied data_chan2.bin from {data_bin_src} to {data_bin_dest}", flush=True)
-                        with open(log_file, "a") as log:
-                            log.write(f"Copied data_chan2.bin from {data_bin_src} to {data_bin_dest}\n")
-                        with open(data_chan2_success_file, "w") as dsf:
-                            dsf.write(f"Successfuly copied data_chan2.bin from plane {plane}.\n")
-                            print(f"[DEBUG] Created data_chan2.bin copy success file at {data_chan2_success_file}", flush=True)
-                        with open(log_file, "a") as log:
-                            log.write(f"Created extraction success file at {success_file}\n")
-                    except Exception as e:
-                        print(f"[DEBUG] Error copying data_chan2.bin for plane {plane}: {e}", flush=True)
-                        with open(log_file, "a") as log:
-                            log.write(f"Error copying data_chan2.bin for plane {plane}: {e}\n")
-                        continue
-                else:
-                    print(f"[DEBUG] data_chan2.bin already exists in {plane_folder} and was copied correctly", flush=True)
-                    with open(log_file, "a") as log:
-                        log.write(f"data_chan2.bin already exists in {plane_folder} and was copied correctly\n")
-            else:
-                data_chan2_dest = None
-
-            #Copy ops.npy
-            ops_src = os.path.join(self.plane_data[plane]["folder"], "ops.npy")
-            ops_dest = os.path.join(plane_folder, "ops.npy")
-            try:
-                shutil.copy(ops_src, ops_dest)
-                print(f"[DEBUG] Copied ops.npy from {ops_src} to {ops_dest}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Copied ops.npy from {ops_src} to {ops_dest}\n")
-                # Load the ops file to modify paths
-                print(f"[DEBUG] Loading ops.npy from {ops_dest}", flush=True)
-                ops = np.load(ops_dest, allow_pickle=True).item()
-                # Modify paths in ops
-                ops["ops_path"] = ops_dest
-                if "reg_file" in ops:
-                    ops["reg_file"] = os.path.join(plane_folder, os.path.basename(ops["reg_file"]))
-                    print(f"[DEBUG] Patched ops['reg_file'] → {ops['reg_file']}", flush=True)
-                if "reg_file_chan2" in ops:
-                    ops["reg_file_chan2"] = os.path.join(plane_folder, os.path.basename(ops["reg_file_chan2"]))
-                    print(f"[DEBUG] Patched ops['reg_file_chan2'] → {ops['reg_file_chan2']}", flush=True)
-                # Save the modified ops right back over the copy
-                np.save(ops_dest, ops)
-                print(f"[DEBUG] Overwrote ops.npy with patched paths", flush=True)
-            except Exception as e:
-                print(f"[DEBUG] Error copying ops.npy for plane {plane}: {e}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Error copying ops.npy for plane {plane}: {e}\n")
-            #Loading copied ops.npy
-            try:
-                ops = np.load(ops_dest, allow_pickle=True).item()
-                print(f"[DEBUG] Loaded copied ops.npy for plane {plane}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Loaded copied ops.npy for plane {plane}\n")
-            except Exception as e:
-                print(f"[DEBUG] Error loading copied ops.npy for plane {plane}: {e}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Error loading copied ops.npy for plane {plane}: {e}\n")
-                continue
-
-            Ly = ops.get("Ly")
-            Lx = ops.get("Lx")
-            aspect = ops.get("aspect", 1.0)
-            if isinstance(aspect, (list, tuple, np.ndarray)):
-                aspect = aspect[0]
-            diameter = ops.get("diameter", 10)
-            if isinstance(diameter, (list, tuple, np.ndarray)):
-                diameter = diameter[0]
-            max_overlap = ops.get("max_overlap", 1.0)
-            if isinstance(max_overlap, (list, tuple, np.ndarray)):
-                max_overlap = max_overlap[0]
-            do_crop = ops.get("soma_crop", 1)
-            if isinstance(do_crop, (list, tuple, np.ndarray)):
-                do_crop = do_crop[0]
-            print(f"[DEBUG] For plane {plane}, parameters: Ly={Ly}, Lx={Lx}, aspect={aspect}, diameter={diameter}, max_overlap={max_overlap}, do_crop={do_crop}", flush=True)
-            with open(log_file, "a") as log:
-                log.write(f"For plane {plane}, parameters: Ly={Ly}, Lx={Lx}, aspect={aspect}, diameter={diameter}, max_overlap={max_overlap}, do_crop={do_crop}\n")
-
-            # Build stat0 from ROI data.
-            stat0 = {}
-            roi_list = [(k, roi) for k, roi in self.roi_data.items() if roi["plane"] == plane]
-            roi_list_sorted = sorted(roi_list, key=lambda x: x[0])
-            for idx, (roi_key, roi) in enumerate(roi_list_sorted):
-                vertices = np.array(roi["ROI coordinates"])
-                if vertices.size == 0:
-                    print(f"[DEBUG] ROI {roi_key} on plane {plane} has no vertices.", flush=True)
-                    with open(log_file, "a") as log:
-                        log.write(f"ROI {roi_key} on plane {plane} has no vertices.\n")
-                    continue
-                x_min = int(np.floor(np.min(vertices[:, 0])))
-                x_max = int(np.ceil(np.max(vertices[:, 0])))
-                y_min = int(np.floor(np.min(vertices[:, 1])))
-                y_max = int(np.ceil(np.max(vertices[:, 1])))
-                xx, yy = np.meshgrid(np.arange(x_min, x_max+1), np.arange(y_min, y_max+1))
-                points = np.vstack((xx.flatten(), yy.flatten())).T
-                from matplotlib.path import Path
-                poly_path = Path(vertices)
-                inside = poly_path.contains_points(points)
-                inside = inside.reshape(yy.shape)
-                ypix = np.where(inside)[0] + y_min
-                xpix = np.where(inside)[1] + x_min
-                lam = np.ones(ypix.shape)
-                stat0[idx] = {"ypix": np.array(ypix), "xpix": np.array(xpix), "lam": np.array(lam)}
-                print(f"[DEBUG] Plane {plane}, ROI index {idx}: computed mask with {len(ypix)} pixels.", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Plane {plane}, ROI index {idx}: computed mask with {len(ypix)} pixels.\n")
-            stat0_file = os.path.join(plane_folder, "stat0.npy")
-            try:
-                np.save(stat0_file, stat0)
-                print(f"[DEBUG] Saved stat0.npy for plane {plane} in {plane_folder}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Saved stat0.npy for plane {plane} in {plane_folder}\n")
-            except Exception as e:
-                print(f"[DEBUG] Error saving stat0.npy for plane {plane}: {e}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Error saving stat0.npy for plane {plane}: {e}\n")
-                continue
-
-            stat0_list = list(stat0.values())
-            try:
-                print("[DEBUG] Calling roi_stats with patched roi_stats", flush=True)
-                stat1 = roi_stats(stat0_list, Ly, Lx, aspect=aspect, diameter=diameter, max_overlap=max_overlap, do_crop=do_crop)
-                stat1_filename = "stat1.npy" if self.mode=="normal" else "stat1_dendrite_axon_mode.npy"
-                stat1_file = os.path.join(plane_folder, stat1_filename)
-                np.save(stat1_file, stat1)
-                print(f"[DEBUG] Saved stat1 for plane {plane} in {plane_folder}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Saved stat1 for plane {plane} in {plane_folder}\n")
-            except Exception as e:
-                print(f"[DEBUG] Error in roi_stats for plane {plane}: {e}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Error in roi_stats for plane {plane}: {e}\n")
-                continue
-
-            try:
-                f_reg_data = BinaryFile(Ly, Lx, data_bin_dest, n_frames=ops.get("nframes"), dtype=ops.get("datatype", "int16"))
-                print(f"[DEBUG] Loaded BinaryFile for data.bin for plane {plane}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Loaded BinaryFile for data.bin for plane {plane}\n")
-            except Exception as e:
-                print(f"[DEBUG] Error loading BinaryFile for data.bin for plane {plane}: {e}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Error loading BinaryFile for data.bin for plane {plane}: {e}\n")
-                continue
-
-            if data_chan2_dest is not None:
-                try:
-                    f_reg_chan2_data = BinaryFile(Ly, Lx, data_chan2_dest, n_frames=ops.get("nframes"), dtype=ops.get("datatype", "int16"))
-                    print(f"[DEBUG] Loaded BinaryFile for data_chan2.bin for plane {plane}", flush=True)
-                    with open(log_file, "a") as log:
-                        log.write(f"Loaded BinaryFile for data_chan2.bin for plane {plane}\n")
-                except Exception as e:
-                    print(f"[DEBUG] Error loading BinaryFile for data_chan2.bin for plane {plane}: {e}", flush=True)
-                    with open(log_file, "a") as log:
-                        log.write(f"Error loading BinaryFile for data_chan2.bin for plane {plane}: {e}\n")
-                    f_reg_chan2_data = None
-            else:
-                f_reg_chan2_data = None
-
-            try:
-                print(f"[DEBUG] Calling extraction_wrapper for plane {plane}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Calling extraction_wrapper for plane {plane}\n")
-                
-                # Redirect stdout to capture what extraction_wrapper prints.
-                old_stdout = sys.stdout
-                sys.stdout = mystdout = io.StringIO()
-                try:
-                    outputs = extraction_wrapper(stat1, f_reg_data, f_reg_chan2_data, cell_masks=None, neuropil_masks=None, ops=ops)
-                finally:
-                    sys.stdout = old_stdout  # Always restore stdout
-                extraction_printed = mystdout.getvalue()
-                with open(log_file, "a") as log:
-                    log.write("Extraction wrapper printed:\n" + extraction_printed + "\n")
-                
-                stat_out, F, Fneu, F_chan2, Fneu_chan2 = outputs
-                np.save(os.path.join(plane_folder, "stat.npy"), stat_out)
-                np.save(os.path.join(plane_folder, "F.npy"), F)
-                np.save(os.path.join(plane_folder, "Fneu.npy"), Fneu)
-                np.save(os.path.join(plane_folder, "F_chan2.npy"), F_chan2)
-                np.save(os.path.join(plane_folder, "Fneu_chan2.npy"), Fneu_chan2)
-                with open(log_file, "a") as log:
-                    log.write(f"Extraction complete for plane {plane}.\n")
-            except Exception as e:
-                print(f"[DEBUG] Error in extraction_wrapper for plane {plane}: {e}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Error in extraction_wrapper for plane {plane}: {e}\n")
-                continue
-
-
-            try:
-                print(f"[DEBUG] Running spike deconvolution for plane {plane}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Running spike deconvolution for plane {plane}\n")
-                dF = F.copy() - ops["neucoeff"] * Fneu
-                dF = preprocess(F=dF, baseline=ops["baseline"], win_baseline=ops["win_baseline"],
-                                sig_baseline=ops["sig_baseline"], fs=ops["fs"],
-                                prctile_baseline=ops["prctile_baseline"])
-                spks = oasis(F=dF, batch_size=ops["batch_size"], tau=ops["tau"], fs=ops["fs"])
-                spks_file = os.path.join(plane_folder, "spks.npy")
-                np.save(spks_file, spks)
-                print(f"[DEBUG] Saved spks.npy for plane {plane} in {plane_folder}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Saved spks.npy for plane {plane} in {plane_folder}\n")
-            except Exception as e:
-                print(f"[DEBUG] Error in spike deconvolution for plane {plane}: {e}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Error in spike deconvolution for plane {plane}: {e}\n")
-            try:
-                roi_ids = [roi_id for roi_id, info in self.roi_data.items() if info["plane"] == plane]
-                iscell_arr = np.ones((len(roi_ids), 2), dtype=int)
-                iscell_file = os.path.join(plane_folder, "iscell.npy")
-                np.save(iscell_file, iscell_arr)
-                print(f"[DEBUG] Saved iscell.npy for plane {plane} in {plane_folder}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Saved iscell.npy for plane {plane} in {plane_folder}\n")
-            except Exception as e:
-                print(f"[DEBUG] Error creating iscell.npy for plane {plane}: {e}", flush=True)
-                with open(log_file, "a") as log:
-                    log.write(f"Error creating iscell.npy for plane {plane}: {e}\n")
-        # After processing all planes, create a success file.
+        # Ensure worker has required inputs on disk
         try:
-            with open(success_file, "w") as sf:
-                sf.write("Extraction finished successfully.\n")
-            print(f"[DEBUG] Created extraction success file at {success_file}", flush=True)
-            with open(log_file, "a") as log:
-                log.write(f"Created extraction success file at {success_file}\n")
+            np.save(os.path.join(spines_gui_folder, "roi_data.npy"), self.roi_data, allow_pickle=True)
+            np.save(os.path.join(spines_gui_folder, "plane_data.npy"), self.plane_data, allow_pickle=True)
         except Exception as e:
-            print(f"[DEBUG] Error creating extraction success file: {e}", flush=True)
-            with open(log_file, "a") as log:
-                log.write(f"Error creating extraction success file: {e}\n")
-    # --- Build and display conversion dictionary ---
-        conversion_dict = {}
-        plane_groups = {}
-        # Build conversion dictionary from self.roi_data.
-        for key, roi in self.roi_data.items():
-            # In dendrites/axons mode, ensure the roi-type list has 5 elements.
-            if self.mode == "dendrites_axons" and len(roi["roi-type"]) < 5:
-                roi["roi-type"] = roi["roi-type"] + [0]
-            p = roi["plane"]
-            plane_groups.setdefault(p, []).append((key, roi))
-        for plane, items in plane_groups.items():
-            items_sorted = sorted(items, key=lambda x: x[0])
-            for idx, (roi_key, roi) in enumerate(items_sorted):
-                roi["conversion"] = [plane, idx]
-                conversion_dict[roi_key] = roi
-        # Sort and add conversion index.
-        sorted_conversion = sorted(conversion_dict.items(),
-                                key=lambda x: (x[1]["conversion"][0], x[1]["conversion"][1]))
-        for new_index, (roi_key, roi) in enumerate(sorted_conversion):
-            roi["conversion index"] = new_index
+            QMessageBox.warning(self, "Error", f"Could not save ROI/plane data for worker:\n{e}")
+            return
 
-        # Determine file name based on mode.
-        conv_filename = "ROIs_conversion.npy" if self.mode == "normal" else "ROIs_dendrite_axon_mode_conversion.npy"
-        rois_conv_file = os.path.join(spines_gui_folder, conv_filename)
+        # Enqueue
         try:
-            np.save(rois_conv_file, conversion_dict)
-            print(f"[DEBUG] Saved conversion dictionary to {rois_conv_file}", flush=True)
+            from queue_db import QueueDB
+            q = QueueDB()
+            exp_id = getattr(self, "expID", None) or os.path.basename(os.path.normpath(self.root_folder))
+            job_id = q.enqueue_job(exp_id=exp_id, root_folder=self.root_folder, mode=self.mode, force=force)
+            QMessageBox.information(self, "Queued", f"Extraction job #{job_id} queued.")
         except Exception as e:
-            print(f"[DEBUG] Error saving conversion dictionary: {e}", flush=True)
+            QMessageBox.warning(self, "Queue error", str(e))
+            raise
 
-        # Now load the conversion dictionary and display it.
-        try:
-            conv_dict_loaded = np.load(rois_conv_file, allow_pickle=True).item()
-            print("[DEBUG] Loaded conversion dictionary for display:", conv_dict_loaded, flush=True)
-            conv_dialog = ConversionTableDialog(conv_dict_loaded, self)
-            conv_dialog.exec_()
-        except Exception as e:
-            print(f"[DEBUG] Error displaying conversion table: {e}", flush=True)
 
-        QMessageBox.information(self, "Extraction Finished", "Extraction finished.")
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     main_win = MainWindow()

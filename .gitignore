@@ -1,0 +1,27 @@
+# =========================
+# Queue runtime state
+# =========================
+
+# SQLite queue database
+queue/jobs.sqlite
+queue/jobs.sqlite-shm
+queue/jobs.sqlite-wal
+
+# Worker logs
+queue/worker_stdout.log
+
+# Per-job logs
+queue/logs/
+
+# =========================
+# Python cache
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+
+# =========================
+# Conda / venv (if local)
+# =========================
+.env/
+.venv/

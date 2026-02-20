@@ -1,0 +1,10 @@
+[Thu Feb 19 04:24:23 PM CET 2026] start_worker_tmux.sh called
+[Thu Feb 19 04:24:23 PM CET 2026] Starting tmux session 'spines_queue' with command:
+source /home/rubencorreia/miniconda3/etc/profile.d/conda.sh && conda activate spinesGUI && cd /home/rubencorreia/code/SpinesGUI && python -u worker.py --db /home/rubencorreia/code/SpinesGUI/queue/jobs.sqlite --poll 2 |& tee -a /home/rubencorreia/code/SpinesGUI/queue/worker_stdout.log
+[Thu Feb 19 04:24:23 PM CET 2026] Started worker in tmux session: spines_queue
+[Thu Feb 19 04:24:23 PM CET 2026] DB: /home/rubencorreia/code/SpinesGUI/queue/jobs.sqlite
+[Thu Feb 19 05:12:45 PM CET 2026] start_worker_tmux.sh called
+[Thu Feb 19 05:12:45 PM CET 2026] Starting tmux session 'spines_queue' with command:
+source /home/rubencorreia/miniconda3/etc/profile.d/conda.sh && conda activate spinesGUI && cd /home/rubencorreia/code/SpinesGUI && python -u worker.py --db /home/rubencorreia/code/SpinesGUI/queue/jobs.sqlite --poll 2 |& tee -a /home/rubencorreia/code/SpinesGUI/queue/worker_stdout.log
+[Thu Feb 19 05:12:45 PM CET 2026] Started worker in tmux session: spines_queue
+[Thu Feb 19 05:12:45 PM CET 2026] DB: /home/rubencorreia/code/SpinesGUI/queue/jobs.sqlite
