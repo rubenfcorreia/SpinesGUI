@@ -170,15 +170,20 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
 
             stat0[idx] = {"ypix": np.array(ypix), "xpix": np.array(xpix), "lam": np.array(lam)}
             print(f"[DEBUG] Plane {plane}, ROI index {idx}: mask {len(ypix)} px", flush=True)
-
+            
         stat0_file = os.path.join(plane_folder, "stat0.npy")
         np.save(stat0_file, stat0)
 
-        # roi_stats expects list
-        stat0_list = list(stat0.values())
+        # roi_stats expects array-like; object array supports fancy indexing
+        stat0_arr = np.array(list(stat0.values()), dtype=object)
+
+        # Guard against bad diameter
+        if diameter is None or float(diameter) <= 0:
+            print(f"[DEBUG] Plane {plane}: ops diameter={diameter} → using default 10", flush=True)
+            diameter = 10
 
         stat1 = roi_stats(
-            stat0_list, Ly, Lx,
+            stat0_arr, Ly, Lx,
             aspect=aspect, diameter=diameter, max_overlap=max_overlap, do_crop=do_crop
         )
         stat1_filename = "stat1.npy" if mode == "normal" else "stat1_dendrite_axon_mode.npy"

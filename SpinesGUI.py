@@ -30,13 +30,13 @@ import sys, io, os, shutil, numpy as np
 from collections import OrderedDict
 from matplotlib.path import Path
 
-from PyQt5.QtCore import Qt, QPointF, QRectF
+from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer
 from PyQt5.QtGui import QPixmap, QImage, QPolygonF, QPen, QBrush, QColor
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QFileDialog, QMessageBox,
                              QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsPolygonItem,
                              QGraphicsEllipseItem, QPushButton, QLabel, QVBoxLayout, QHBoxLayout,
                              QFormLayout, QDialog, QComboBox, QLineEdit, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QMenu, QSlider, QButtonGroup, QRadioButton)
+                             QHeaderView, QMenu, QSlider, QButtonGroup, QRadioButton,QAbstractItemView)
 
 # Import Suite2p functions and BinaryFile.
 try:
@@ -441,6 +441,7 @@ class CustomGraphicsView(QGraphicsView):
             super(CustomGraphicsView, self).keyPressEvent(event)
 
 # --- ROITableWindow, ConfirmROITableDialog, ConversionTableDialog Classes ---
+
 class ROITableWindow(QDialog):
     def __init__(self, roi_data, parent=None):
         super(ROITableWindow, self).__init__(parent)
@@ -531,6 +532,7 @@ class ConfirmROITableDialog(QDialog):
         self.setLayout(layout)
         self.continue_btn.clicked.connect(self.accept)
         self.cancel_btn.clicked.connect(self.reject)
+
     def populate_table(self):
         self.table.setRowCount(len(self.roi_data))
         for row, roi_id in enumerate(sorted(self.roi_data.keys())):
@@ -831,6 +833,8 @@ class MainWindow(QMainWindow):
         self.roi_table_button.clicked.connect(self.open_roi_table)
         self.extract_button = QPushButton("Extract ROIs")
         self.extract_button.clicked.connect(self.extract_rois)
+        self.queue_monitor_button = QPushButton("Queue Monitor")
+        self.queue_monitor_button.clicked.connect(self.open_queue_monitor)
         self.clear_rois_button = QPushButton("Clear All ROIs")
         self.clear_rois_button.clicked.connect(self.clear_all_rois)
         self.left_arrow_button = QPushButton("<")
@@ -876,6 +880,7 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(self.add_roi_button)
         top_layout.addWidget(self.roi_table_button)
         top_layout.addWidget(self.extract_button)
+        top_layout.addWidget(self.queue_monitor_button)
         top_layout.addWidget(self.clear_rois_button)
         top_layout.addWidget(self.left_arrow_button)
         top_layout.addWidget(self.right_arrow_button)
@@ -1393,7 +1398,6 @@ class MainWindow(QMainWindow):
             event.accept()
         else:
             event.ignore()
-
     def extract_rois(self):
         if self.root_folder is None:
             QMessageBox.warning(self, "Error", "No root folder loaded.")
@@ -1402,14 +1406,14 @@ class MainWindow(QMainWindow):
         spines_gui_folder = os.path.join(self.root_folder, "SpinesGUI")
         os.makedirs(spines_gui_folder, exist_ok=True)
 
-        # Decide if re-extraction based on stat1 presence (same logic)
+        # Decide if re-extraction based on success marker (same as worker)
         success_file = os.path.join(spines_gui_folder, "extraction_successfull.txt")
         reextract = os.path.exists(success_file)
 
         force = False
         if reextract:
-            success_file = os.path.join(spines_gui_folder, "extraction_successfull.txt")
-            msg = ("Previous extraction was successful. " if os.path.exists(success_file)
+            msg = ("Previous extraction was successful. "
+                if os.path.exists(success_file)
                 else "Previous extraction was not successful or not completed. ")
             msg += "Do you want to re-run extraction? This will overwrite previous extraction outputs."
             if QMessageBox.question(self, "Re-run Extraction", msg, QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
@@ -1428,13 +1432,53 @@ class MainWindow(QMainWindow):
         try:
             from queue_db import QueueDB
             q = QueueDB()
-            exp_id = getattr(self, "expID", None) or os.path.basename(os.path.normpath(self.root_folder))
-            job_id = q.enqueue_job(exp_id=exp_id, root_folder=self.root_folder, mode=self.mode, force=force)
-            QMessageBox.information(self, "Queued", f"Extraction job #{job_id} queued.")
-        except Exception as e:
-            QMessageBox.warning(self, "Queue error", str(e))
-            raise
 
+            exp_id = getattr(self, "expID", None) or os.path.basename(
+                os.path.dirname(os.path.normpath(self.root_folder))
+            )
+
+            job_id = q.enqueue_job(
+                exp_id=exp_id,
+                root_folder=self.root_folder,
+                mode=self.mode,
+                force=force,
+            )
+
+            print(f"[GUI] queued job_id={job_id} exp_id={exp_id} force={force}", flush=True)
+            QMessageBox.information(self, "Queued", f"Extraction job #{job_id} queued.\n{exp_id}\nforce={force}")
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Queue error", f"{type(e).__name__}: {e}")
+            return
+        
+    def open_queue_monitor(self):
+        # Use the *real* monitor UI from queue_monitor.py
+        try:
+            import os, sys
+
+            # Ensure SpinesGUI project root is on sys.path
+            # If SpinesGUI.py is in the project root alongside queue_monitor.py, this is enough:
+            PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
+            if PROJECT_ROOT not in sys.path:
+                sys.path.insert(0, PROJECT_ROOT)
+
+            from queue_monitor import QueueMonitorDialog  # <-- the big window version
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Queue monitor import error", f"{type(e).__name__}: {e}")
+            return
+
+        # Keep reference so it doesn't get garbage-collected
+        if not hasattr(self, "_queue_monitor") or self._queue_monitor is None:
+            self._queue_monitor = QueueMonitorDialog(parent=self)  # optional: pass refresh_ms=1000
+
+        self._queue_monitor.show()
+        self._queue_monitor.raise_()
+        self._queue_monitor.activateWindow()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
