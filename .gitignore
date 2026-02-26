@@ -13,6 +13,9 @@ queue/worker_stdout.log
 # Per-job logs
 queue/logs/
 
+# Tmux launch log
+queue/tmux_launch.log
+
 # =========================
 # Python cache
 # =========================
@@ -25,3 +28,4 @@ __pycache__/
 # =========================
 .env/
 .venv/
+
