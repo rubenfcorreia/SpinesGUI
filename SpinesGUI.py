@@ -65,6 +65,15 @@ def median_pix(ypix, xpix):
 def norm_by_average(values: np.ndarray, estimator=np.mean, first_n: int = 100, offset: float = 0.) -> np.ndarray:
     return values / (estimator(values[:first_n]) + offset)
 
+
+def _first_not_none(*vals):
+    """Return the first value that is not None (safe for NumPy arrays)."""
+    for v in vals:
+        if v is not None:
+            return v
+    return None
+
+
 # --- Minimal ROI Class (for roi_stats) ---
 class ROI:
     def __init__(self, ypix, xpix, lam, med, do_crop):
@@ -811,8 +820,10 @@ class MainWindow(QMainWindow):
         self.tracing_vertices = []
         self.tracing_polygon_item = None
         self.tracing_markers = []
-        self.current_meanImg = None  # The image currently displayed
-        self.current_view = "Mean Image"  # or "Mean Image Enhanced"
+        self.current_meanImg = None  # Currently displayed grayscale image (2D)
+        self.current_rgb = None      # Currently displayed RGB image (H,W,3) uint8 (computed in update_contrast)
+        self.current_combined = None # tuple (green_src_2d, red_src_2d) for combined view
+        self.current_view_key = "func_mean"  # one of: func_mean, func_enh, ch2_mean, combined, max_proj
         self.mode = "normal"  # or "dendrites_axons"
         self.init_ui()
     def init_ui(self):
@@ -851,22 +862,31 @@ class MainWindow(QMainWindow):
         self.contrast_slider.setMaximum(200)
         self.contrast_slider.setValue(100)
         self.contrast_slider.valueChanged.connect(self.update_contrast)
+
+        # View selector (multi-channel when available)
+        # Use buttons (old style) instead of a combo box.
+        self.view_buttons = {}
         self.view_button_group = QButtonGroup(self)
-        self.radio_mean = QRadioButton("Mean Image")
-        self.radio_mean_enhanced = QRadioButton("Mean Image Enhanced")
-        self.radio_max = QRadioButton("Max Projection")  # New radio button for max projection.
-        self.radio_mean.setChecked(True)  # Default selection.
-        self.view_button_group.addButton(self.radio_mean, 0)
-        self.view_button_group.addButton(self.radio_mean_enhanced, 1)
-        self.view_button_group.addButton(self.radio_max, 2)
-        self.radio_mean.toggled.connect(self.update_view)
-        self.radio_mean_enhanced.toggled.connect(self.update_view)
-        self.radio_max.toggled.connect(self.update_view)
+        self.view_button_group.setExclusive(True)
+
+        def _add_view_btn(label: str, key: str, checked: bool = False):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setChecked(checked)
+            self.view_button_group.addButton(btn)
+            self.view_buttons[key] = btn
+            btn.toggled.connect(lambda on, k=key: on and self._set_view_key(k))
+            return btn
+
         view_layout = QHBoxLayout()
-        view_layout.addWidget(self.radio_mean)
-        view_layout.addWidget(self.radio_mean_enhanced)
-        view_layout.addWidget(self.radio_max)
+        view_layout.addWidget(QLabel("View:"))
+        view_layout.addWidget(_add_view_btn("Functional Mean", "func_mean", checked=True))
+        view_layout.addWidget(_add_view_btn("Functional Enhanced", "func_enh"))
+        view_layout.addWidget(_add_view_btn("Max Projection", "max_proj"))
+        view_layout.addWidget(_add_view_btn("Other Channel Mean", "ch2_mean"))
+        view_layout.addWidget(_add_view_btn("Combined (G=ch1, R=ch2)", "combined"))
         view_layout.addStretch()
+
         self.coord_label = QLabel("X : Out of range\nY : Out of range")
         self.coord_label.setAlignment(Qt.AlignRight | Qt.AlignBottom)
         bottom_layout.addWidget(self.current_plane_label)
@@ -970,65 +990,139 @@ class MainWindow(QMainWindow):
         else:
             print("[DEBUG] ROI file not found at", rois_file, flush=True)
 
-    def update_view(self):
-        # Determine the current view based on the selected radio button.
-        if self.radio_mean.isChecked():
-            self.current_view = "Mean Image"
-        elif self.radio_mean_enhanced.isChecked():
-            self.current_view = "Mean Image Enhanced"
-        elif self.radio_max.isChecked():
-            self.current_view = "Max Projection"
-        else:
-            self.current_view = "Mean Image"  # default fallback
+    def _get_channel_mean(self, plane: dict, chan: int):
+        """Return the mean image for a given channel (1-indexed), if available."""
+        if chan == 1:
+            return plane.get("meanImg", None)
+        if chan == 2:
+            return _first_not_none(plane.get("meanImg_chan2", None), plane.get("meanImg_chan2_corrected", None))
+        return None
 
-        print(f"[DEBUG] Current view: {self.current_view}", flush=True)
-        
-        # Update the current_meanImg based on the selected view.
-        if self.plane_order:
-            plane_num = self.plane_order[self.current_plane_index]
-            plane = self.plane_data[plane_num]
-            if self.current_view == "Max Projection" and "max_proj" in plane:
-                # Use the max projection from the ops.
-                mproj = plane["max_proj"]
+    def _get_functional_channel(self, plane: dict) -> int:
+        """Suite2p stores functional_chan as 1-indexed (1..nchannels)."""
+        try:
+            fc = int(plane.get("functional_chan", 1))
+            return fc if fc >= 1 else 1
+        except Exception:
+            return 1
+
+    def _set_view_key(self, key: str):
+        self.current_view_key = key or "func_mean"
+        self.update_view()
+
+    def update_view(self):
+        print(f"[DEBUG] Current view key: {self.current_view_key}", flush=True)
+
+        if not self.plane_order:
+            return
+
+        plane_num = self.plane_order[self.current_plane_index]
+        plane = self.plane_data[plane_num]
+
+        nchannels = int(plane.get("nchannels", 1) or 1)
+        func_chan = self._get_functional_channel(plane)
+        self._update_channel_button_labels(func_chan)
+        func_mean = _first_not_none(self._get_channel_mean(plane, func_chan), plane.get("meanImg", None))
+        other_chan = 2 if func_chan == 1 else 1
+        other_mean = self._get_channel_mean(plane, other_chan)
+
+        # Reset view state
+        self.current_meanImg = None
+        self.current_combined = None
+
+        if self.current_view_key == "max_proj":
+            mproj = plane.get("max_proj", None)
+            if mproj is None:
+                print("[DEBUG] No 'max_proj' found. Falling back to functional mean.", flush=True)
+                self.current_meanImg = func_mean
+            else:
                 mimg1 = np.percentile(mproj, 1)
                 mimg99 = np.percentile(mproj, 99)
-                mproj_norm = (mproj - mimg1) / (mimg99 - mimg1)
-                # Create a full–sized blank image and insert mproj_norm.
-                
-                self.current_meanImg = np.zeros((plane["Ly"], plane["Lx"]), np.float32)
+                mproj_norm = (mproj - mimg1) / (mimg99 - mimg1 + 1e-12)
+
+                # Create a full–sized blank image and insert mproj_norm into the valid region.
+                Ly, Lx = plane.get("Ly", mproj_norm.shape[0]), plane.get("Lx", mproj_norm.shape[1])
+                self.current_meanImg = np.zeros((Ly, Lx), np.float32)
                 try:
                     self.current_meanImg[plane["yrange"][0]:plane["yrange"][1],
-                                        plane["xrange"][0]:plane["xrange"][1]] = mproj_norm
+                                         plane["xrange"][0]:plane["xrange"][1]] = mproj_norm
                 except Exception as e:
                     print("[DEBUG] Error setting max projection region:", e, flush=True)
                     self.current_meanImg = mproj_norm  # Fallback
-            elif self.current_view == "Mean Image Enhanced" and "meanImgE" in plane:
+
+        elif self.current_view_key == "func_enh":
+            # Suite2p typically provides meanImgE for channel 1 only.
+            if func_chan == 1 and plane.get("meanImgE", None) is not None:
                 self.current_meanImg = plane["meanImgE"]
             else:
-                # Default to Mean Image.
-                self.current_meanImg = plane["meanImg"]
-                print("[DEBUG] No 'max_proj' was found in the ops.npy. Defaulting to Mean Image")
-        
-        # Call update_contrast to refresh the displayed image.
+                print("[DEBUG] Functional enhanced not available for this plane. Falling back to functional mean.", flush=True)
+                self.current_meanImg = func_mean
+
+        elif self.current_view_key == "ch2_mean":
+            if nchannels < 2 or (plane.get("meanImg_chan2", None) is None and plane.get("meanImg_chan2_corrected", None) is None):
+                print("[DEBUG] Channel 2 mean not available. Falling back to functional mean.", flush=True)
+                self.current_meanImg = func_mean
+            else:
+                self.current_meanImg = self._get_channel_mean(plane, 2)
+
+        elif self.current_view_key == "combined":
+            ch1_mean = self._get_channel_mean(plane, 1)
+            ch2_mean = self._get_channel_mean(plane, 2)
+            if nchannels < 2 or ch1_mean is None or ch2_mean is None:
+                print("[DEBUG] Combined view not available. Falling back to functional mean.", flush=True)
+                self.current_meanImg = func_mean
+            else:
+                # Combined view: Green=functional channel, Red=other channel
+                ch1_mean = self._get_channel_mean(plane, 1)
+                ch2_mean = self._get_channel_mean(plane, 2)
+                # Combined view: Green=ch1, Red=ch2
+                self.current_combined = (ch1_mean, ch2_mean)
+
+        else:
+            # Default: functional mean
+            self.current_meanImg = func_mean
+
+        # Refresh the displayed image.
         self.update_contrast()
 
     def update_contrast(self):
-        if self.current_meanImg is None:
+        # Handles both grayscale (self.current_meanImg) and combined RGB (self.current_combined).
+        if self.current_meanImg is None and self.current_combined is None:
             return
-        mimg = self.current_meanImg.astype(np.float32)
-        mimg1 = np.percentile(mimg, 1)
-        mimg99 = np.percentile(mimg, 99)
-        mimg_disp = (mimg - mimg1) / (mimg99 - mimg1)
-        mimg_disp = np.clip(mimg_disp, 0, 1)
+
         factor = self.contrast_slider.value() / 100.0
-        mimg_disp = 0.5 + factor * (mimg_disp - 0.5)
-        mimg_disp = np.clip(mimg_disp, 0, 1)
-        mimg_disp = (mimg_disp * 255).astype(np.uint8)
-        height, width = mimg_disp.shape
-        image = QImage(mimg_disp.data, width, height, width, QImage.Format_Grayscale8)
-        pixmap = QPixmap.fromImage(image)
+
+        def _norm_to_uint8(img2d: np.ndarray) -> np.ndarray:
+            im = img2d.astype(np.float32)
+            p1 = np.percentile(im, 1)
+            p99 = np.percentile(im, 99)
+            disp = (im - p1) / (p99 - p1 + 1e-12)
+            disp = np.clip(disp, 0, 1)
+            disp = 0.5 + factor * (disp - 0.5)
+            disp = np.clip(disp, 0, 1)
+            return (disp * 255).astype(np.uint8)
+
+        if self.current_combined is not None:
+            g_src, r_src = self.current_combined
+            g = _norm_to_uint8(g_src)
+            r = _norm_to_uint8(r_src)
+            h, w = g.shape
+            rgb = np.zeros((h, w, 3), dtype=np.uint8)
+            rgb[..., 0] = r   # Red
+            rgb[..., 1] = g   # Green
+            # Blue stays 0
+
+            self.current_rgb = rgb
+            image = QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(image)
+        else:
+            self.current_rgb = None
+            mimg_disp = _norm_to_uint8(self.current_meanImg)
+            height, width = mimg_disp.shape
+            image = QImage(mimg_disp.data, width, height, width, QImage.Format_Grayscale8)
+            pixmap = QPixmap.fromImage(image)
+
         try:
-            # Try to access the scene safely. If the item is deleted, this will raise a RuntimeError.
             if self.image_pixmap_item is None:
                 raise RuntimeError("Pixmap item is None")
             scene = self.image_pixmap_item.scene()
@@ -1036,9 +1130,8 @@ class MainWindow(QMainWindow):
                 raise RuntimeError("Pixmap item has no scene")
             self.image_pixmap_item.setPixmap(pixmap)
         except RuntimeError:
-            # If the pixmap item was deleted, re-create it.
             self.image_pixmap_item = QGraphicsPixmapItem(pixmap)
-            self.image_pixmap_item.setZValue(0)  # Ensure it is at the back so that ROI items (with higher Z) show on top.
+            self.image_pixmap_item.setZValue(0)
             self.graphics_scene.addItem(self.image_pixmap_item)
 
     def load_suite2p_folder(self):
@@ -1079,7 +1172,7 @@ class MainWindow(QMainWindow):
                             continue
                         if np.isnan(meanImg).any():
                             continue
-                        self.plane_data[plane_num] = {"meanImg": meanImg, "meanImgE": meanImgE, "yrange": yrange, "xrange": xrange_, "folder": subfolder,"max_proj": max_proj,"Ly" : Ly , "Lx" : Lx }
+                        self.plane_data[plane_num] = {"meanImg": meanImg, "meanImgE": meanImgE, "meanImg_chan2": ops.get("meanImg_chan2", None), "meanImg_chan2_corrected": ops.get("meanImg_chan2_corrected", None), "nchannels": ops.get("nchannels", 1), "functional_chan": ops.get("functional_chan", 1), "yrange": yrange, "xrange": xrange_, "folder": subfolder, "max_proj": max_proj, "Ly": Ly, "Lx": Lx }
                         self.plane_order.append(plane_num)
                     except Exception as e:
                         print(f"[DEBUG] Error loading ops.npy in {subfolder}: {e}")
@@ -1113,14 +1206,16 @@ class MainWindow(QMainWindow):
         plane_num = self.plane_order[self.current_plane_index]
         print(f"[DEBUG] Checking plane_num: {plane_num}", flush=True)
         plane = self.plane_data[plane_num]
-        if self.current_view == "Mean Image Enhanced" and plane.get("meanImgE") is not None:
-            self.current_meanImg = plane["meanImgE"]
-        else:
-            self.current_meanImg = plane["meanImg"]
-        self.update_contrast()
+        # Set displayed image according to current view selection (handles multi-channel)
+        self.update_view()
         yrange = plane["yrange"]
         xrange_ = plane["xrange"]
-        height, width = self.current_meanImg.shape
+        if self.current_meanImg is not None:
+            height, width = self.current_meanImg.shape
+        elif self.current_combined is not None:
+            height, width = self.current_combined[0].shape
+        else:
+            height, width = plane.get('Ly', 0), plane.get('Lx', 0)
         self.image_height = height
         self.image_width = width
         valid_rect = QRectF(xrange_[0], yrange[0], xrange_[1]-xrange_[0], yrange[1]-yrange[0])
@@ -1480,6 +1575,21 @@ class MainWindow(QMainWindow):
         self._queue_monitor.raise_()
         self._queue_monitor.activateWindow()
 
+    def _update_channel_button_labels(self, func_chan):
+        func_chan = 1 if int(func_chan) != 2 else 2
+        other_chan = 2 if func_chan == 1 else 1
+
+        if not hasattr(self, "view_buttons"):
+            return
+
+        vb = self.view_buttons
+
+        vb["func_mean"].setText(f"Functional Mean (ch{func_chan})")
+        vb["func_enh"].setText(f"Functional Enhanced (ch{func_chan})")
+        vb["max_proj"].setText(f"Max Projection (ch{func_chan})")
+        vb["ch2_mean"].setText(f"Channel {other_chan} Mean (ch{other_chan})")
+        vb["combined"].setText("Combined (G=ch1, R=ch2)")
+        
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     main_win = MainWindow()
