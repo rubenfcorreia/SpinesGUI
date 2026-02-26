@@ -22,3 +22,5 @@ source /home/rubencorreia/miniconda3/etc/profile.d/conda.sh && conda activate sp
 [Mon Feb 23 10:46:53 AM CET 2026] Worker already running in tmux session: spines_queue
 [Mon Feb 23 10:55:25 AM CET 2026] start_worker_tmux.sh called
 [Mon Feb 23 10:55:25 AM CET 2026] Worker already running in tmux session: spines_queue
+[Thu Feb 26 10:51:18 AM CET 2026] start_worker_tmux.sh called
+[Thu Feb 26 10:51:18 AM CET 2026] Worker already running in tmux session: spines_queue
