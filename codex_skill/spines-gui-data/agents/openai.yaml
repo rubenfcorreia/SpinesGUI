@@ -1,0 +1,3 @@
+interface:
+  display_name: "Spines GUI Data"
+  short_description: "Interpret SpinesGUI ROI conversion libraries"
