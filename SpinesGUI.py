@@ -27,6 +27,7 @@ Requirements:
 """
 
 import sys, io, os, shutil, numpy as np
+from typing import Optional
 from collections import OrderedDict
 from matplotlib.path import Path
 
@@ -36,24 +37,30 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QFileDialog, QM
                              QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsPolygonItem,
                              QGraphicsEllipseItem, QPushButton, QLabel, QVBoxLayout, QHBoxLayout,
                              QFormLayout, QDialog, QComboBox, QLineEdit, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QMenu, QSlider, QButtonGroup, QRadioButton,QAbstractItemView)
+                             QHeaderView, QMenu, QSlider, QButtonGroup, QRadioButton, QAbstractItemView,
+                             QProgressDialog)
 
 # Import Suite2p functions and BinaryFile.
 try:
     from suite2p.detection import roi_stats as original_roi_stats
 except ImportError:
+    original_roi_stats = None
     print("Error: Could not import roi_stats from suite2p.detection.")
 try:
     from suite2p.extraction import extraction_wrapper
 except ImportError:
+    extraction_wrapper = None
     print("Error: Could not import extraction_wrapper from suite2p.extraction.")
 try:
     from suite2p.io.binary import BinaryFile
 except ImportError:
+    BinaryFile = None
     print("Error: Could not import BinaryFile from suite2p.io.binary.")
 try:
     from suite2p.extraction.dcnv import oasis, preprocess
 except ImportError:
+    oasis = None
+    preprocess = None
     print("Error: Could not import oasis and/or preprocess from suite2p.extraction.dcnv.")
 
 QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
@@ -72,6 +79,85 @@ def _first_not_none(*vals):
         if v is not None:
             return v
     return None
+
+
+def _resolve_existing_path(base_folder: str, candidate, fallback_name: str) -> str:
+    """Resolve a file path against a base folder."""
+    if candidate:
+        candidate = str(candidate)
+        if os.path.exists(candidate):
+            return candidate
+        candidate_base = os.path.basename(candidate)
+        if candidate_base:
+            joined = os.path.join(base_folder, candidate_base)
+            if os.path.exists(joined):
+                return joined
+    return os.path.join(base_folder, fallback_name)
+
+
+def compute_suite2p_max_projection(
+    reg_file: str,
+    Ly: int,
+    Lx: int,
+    *,
+    nframes: Optional[int] = None,
+    datatype=None,
+    yrange=None,
+    xrange_=None,
+    chunk_size: Optional[int] = None,
+    progress_callback=None,
+) -> np.ndarray:
+    """Compute the Suite2p-style max projection from a registered binary."""
+    if not reg_file or not os.path.exists(reg_file):
+        raise FileNotFoundError(f"Registered binary not found: {reg_file}")
+    if Ly is None or Lx is None:
+        raise ValueError("Ly and Lx must be set before computing max projection.")
+
+    dtype = np.dtype(datatype if datatype is not None else np.int16)
+    frame_size = int(Ly) * int(Lx) * dtype.itemsize
+    file_size = os.path.getsize(reg_file)
+    frames_from_size = file_size // frame_size if frame_size > 0 else 0
+    if frames_from_size <= 0:
+        raise ValueError(f"Registered binary is too small to contain frames: {reg_file}")
+
+    if nframes is None or int(nframes) <= 0:
+        nframes = frames_from_size
+    else:
+        nframes = min(int(nframes), frames_from_size)
+
+    if chunk_size is None or int(chunk_size) <= 0:
+        chunk_size = max(1, nframes // 100)
+    else:
+        chunk_size = max(1, int(chunk_size))
+
+    movie = np.memmap(reg_file, mode="r", dtype=dtype, shape=(nframes, int(Ly), int(Lx)))
+    max_img = None
+
+    if progress_callback is not None:
+        progress_callback(0, 0, nframes)
+
+    for start in range(0, nframes, chunk_size):
+        stop = min(start + chunk_size, nframes)
+        chunk = np.asarray(movie[start:stop])
+        if chunk.size == 0:
+            continue
+        chunk_max = chunk.max(axis=0)
+        max_img = chunk_max if max_img is None else np.maximum(max_img, chunk_max)
+        if progress_callback is not None:
+            progress_callback(int(round(stop * 100 / nframes)), stop, nframes)
+
+    if max_img is None:
+        raise ValueError(f"No frames were read from registered binary: {reg_file}")
+
+    if yrange is not None and xrange_ is not None:
+        try:
+            y0, y1 = int(yrange[0]), int(yrange[1])
+            x0, x1 = int(xrange_[0]), int(xrange_[1])
+            max_img = max_img[y0:y1, x0:x1]
+        except Exception as exc:
+            raise ValueError(f"Could not crop max projection to valid range: {exc}") from exc
+
+    return np.asarray(max_img)
 
 
 # --- Minimal ROI Class (for roi_stats) ---
@@ -856,12 +942,38 @@ class MainWindow(QMainWindow):
         self.mode_toggle.setCheckable(True)
         self.mode_toggle.clicked.connect(self.toggle_mode)
         self.current_plane_label = QLabel("Current plane: N/A")
-        self.contrast_label = QLabel("Contrast:")
-        self.contrast_slider = QSlider(Qt.Horizontal)
-        self.contrast_slider.setMinimum(50)
-        self.contrast_slider.setMaximum(200)
-        self.contrast_slider.setValue(100)
-        self.contrast_slider.valueChanged.connect(self.update_contrast)
+        self.dark_label = QLabel("Dark percentile: 1%")
+        self.dark_slider = QSlider(Qt.Horizontal)
+        self.dark_slider.setMinimum(0)
+        self.dark_slider.setMaximum(99)
+        self.dark_slider.setValue(1)
+        self.dark_slider.valueChanged.connect(self._on_dark_level_changed)
+
+        self.white_label = QLabel("White percentile: 99%")
+        self.white_slider = QSlider(Qt.Horizontal)
+        self.white_slider.setMinimum(1)
+        self.white_slider.setMaximum(100)
+        self.white_slider.setValue(99)
+        self.white_slider.valueChanged.connect(self._on_white_level_changed)
+
+        self.auto_contrast_button = QPushButton("Auto Contrast")
+        self.auto_contrast_button.clicked.connect(self.auto_contrast)
+
+        self._update_level_labels()
+
+        levels_widget = QWidget()
+        levels_layout = QVBoxLayout(levels_widget)
+        levels_layout.setContentsMargins(0, 0, 0, 0)
+        levels_layout.setSpacing(4)
+        dark_row = QHBoxLayout()
+        dark_row.addWidget(self.dark_label)
+        dark_row.addWidget(self.dark_slider)
+        white_row = QHBoxLayout()
+        white_row.addWidget(self.white_label)
+        white_row.addWidget(self.white_slider)
+        levels_layout.addLayout(dark_row)
+        levels_layout.addLayout(white_row)
+        levels_layout.addWidget(self.auto_contrast_button)
 
         # View selector (multi-channel when available)
         # Use buttons (old style) instead of a combo box.
@@ -891,8 +1003,7 @@ class MainWindow(QMainWindow):
         self.coord_label.setAlignment(Qt.AlignRight | Qt.AlignBottom)
         bottom_layout.addWidget(self.current_plane_label)
         bottom_layout.addStretch()
-        bottom_layout.addWidget(self.contrast_label)
-        bottom_layout.addWidget(self.contrast_slider)
+        bottom_layout.addWidget(levels_widget)
         bottom_layout.addLayout(view_layout)
         bottom_layout.addStretch()
         bottom_layout.addWidget(self.coord_label)
@@ -1006,6 +1117,164 @@ class MainWindow(QMainWindow):
         except Exception:
             return 1
 
+    def _current_display_levels(self):
+        dark = int(self.dark_slider.value())
+        white = int(self.white_slider.value())
+        if white <= dark:
+            white = min(100, dark + 1)
+            dark = max(0, white - 1)
+        return dark, white
+
+    def _update_level_labels(self):
+        dark, white = self._current_display_levels()
+        self.dark_label.setText(f"Dark percentile: {dark}%")
+        self.white_label.setText(f"White percentile: {white}%")
+
+    def _on_dark_level_changed(self, value):
+        if value >= self.white_slider.value():
+            self.white_slider.blockSignals(True)
+            self.white_slider.setValue(min(100, value + 1))
+            self.white_slider.blockSignals(False)
+        self._update_level_labels()
+        self.update_contrast()
+
+    def _on_white_level_changed(self, value):
+        if value <= self.dark_slider.value():
+            self.dark_slider.blockSignals(True)
+            self.dark_slider.setValue(max(0, value - 1))
+            self.dark_slider.blockSignals(False)
+        self._update_level_labels()
+        self.update_contrast()
+
+    def auto_contrast(self):
+        self.dark_slider.blockSignals(True)
+        self.white_slider.blockSignals(True)
+        self.dark_slider.setValue(1)
+        self.white_slider.setValue(99)
+        self.dark_slider.blockSignals(False)
+        self.white_slider.blockSignals(False)
+        self._update_level_labels()
+        self.update_contrast()
+
+    def _pad_to_valid_region(self, plane: dict, image2d: np.ndarray) -> np.ndarray:
+        image = np.asarray(image2d)
+        Ly = int(plane.get("Ly", image.shape[0]))
+        Lx = int(plane.get("Lx", image.shape[1]))
+        yrange = plane.get("yrange", None)
+        xrange_ = plane.get("xrange", None)
+        if image.shape == (Ly, Lx) or yrange is None or xrange_ is None:
+            return image
+        full_img = np.zeros((Ly, Lx), np.float32)
+        try:
+            y0, y1 = int(yrange[0]), int(yrange[1])
+            x0, x1 = int(xrange_[0]), int(xrange_[1])
+            full_img[y0:y1, x0:x1] = image
+            return full_img
+        except Exception:
+            return image
+
+    def _persist_max_projection(self, plane: dict, max_proj: np.ndarray) -> None:
+        ops_path = plane.get("ops_path") or os.path.join(plane.get("folder", ""), "ops.npy")
+        if not ops_path:
+            raise FileNotFoundError("No ops.npy path available for this plane.")
+        if not os.path.exists(ops_path):
+            raise FileNotFoundError(f"ops.npy not found: {ops_path}")
+        ops = np.load(ops_path, allow_pickle=True).item()
+        ops["max_proj"] = np.asarray(max_proj)
+        tmp_path = ops_path + ".tmp"
+        with open(tmp_path, "wb") as tmp_file:
+            np.save(tmp_file, ops, allow_pickle=True)
+        os.replace(tmp_path, ops_path)
+
+    def _get_max_projection_image(self, plane_num: int, plane: dict, func_mean: np.ndarray) -> np.ndarray:
+        mproj = plane.get("max_proj", None)
+        if mproj is None or np.asarray(mproj).size == 0:
+            mproj = self._compute_max_projection_for_plane(plane_num, plane)
+            if mproj is None:
+                print("[DEBUG] No usable 'max_proj' found. Falling back to functional mean.", flush=True)
+                return func_mean
+        return self._pad_to_valid_region(plane, np.asarray(mproj))
+
+    def _compute_max_projection_for_plane(self, plane_num: int, plane: dict):
+        prompt = "\n".join([
+            f"Plane {plane_num} does not have a stored max projection.",
+            "Compute it now from the Suite2p registered binary?",
+            "This may take a moment.",
+        ])
+        reply = QMessageBox.question(
+            self,
+            "Compute Max Projection",
+            prompt,
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return None
+
+        reg_file = _resolve_existing_path(plane.get("folder", ""), plane.get("reg_file"), "data.bin")
+        Ly = plane.get("Ly", None)
+        Lx = plane.get("Lx", None)
+        nframes = plane.get("nframes", None)
+        datatype = plane.get("datatype", None)
+        yrange = plane.get("yrange", None)
+        xrange_ = plane.get("xrange", None)
+
+        progress_dialog = QProgressDialog("Computing max projection...", None, 0, 100, self)
+        progress_dialog.setWindowTitle("Compute Max Projection")
+        progress_dialog.setWindowModality(Qt.WindowModal)
+        progress_dialog.setMinimumDuration(0)
+        progress_dialog.setAutoClose(False)
+        progress_dialog.setAutoReset(False)
+        progress_dialog.setCancelButton(None)
+        progress_dialog.setValue(0)
+        progress_dialog.show()
+        QApplication.processEvents()
+
+        def _update_progress(percent, processed, total):
+            percent = max(0, min(100, int(percent)))
+            msg = f"Computing max projection... {percent}%"
+            progress_dialog.setLabelText(msg)
+            progress_dialog.setValue(percent)
+            self.statusBar().showMessage(msg)
+            QApplication.processEvents()
+
+        try:
+            max_proj = compute_suite2p_max_projection(
+                reg_file,
+                Ly,
+                Lx,
+                nframes=nframes,
+                datatype=datatype,
+                yrange=yrange,
+                xrange_=xrange_,
+                progress_callback=_update_progress,
+            )
+            progress_dialog.setValue(100)
+            progress_dialog.setLabelText("Computing max projection... 100%")
+            QApplication.processEvents()
+            try:
+                self._persist_max_projection(plane, max_proj)
+            except Exception as save_exc:
+                print(f"[DEBUG] Computed max projection but could not save ops.npy: {save_exc}", flush=True)
+                QMessageBox.warning(
+                    self,
+                    "Save Max Projection",
+                    f"Computed max projection, but could not save it to ops.npy.\n{save_exc}",
+                )
+            plane["max_proj"] = max_proj
+            return max_proj
+        except Exception as exc:
+            print(f"[DEBUG] Failed to compute max projection for plane {plane_num}: {exc}", flush=True)
+            QMessageBox.warning(
+                self,
+                "Compute Max Projection",
+                f"Could not compute the max projection for plane {plane_num}.\n{exc}",
+            )
+            return None
+        finally:
+            self.statusBar().clearMessage()
+            progress_dialog.close()
+            progress_dialog.deleteLater()
+
     def _set_view_key(self, key: str):
         self.current_view_key = key or "func_mean"
         self.update_view()
@@ -1031,24 +1300,7 @@ class MainWindow(QMainWindow):
         self.current_combined = None
 
         if self.current_view_key == "max_proj":
-            mproj = plane.get("max_proj", None)
-            if mproj is None:
-                print("[DEBUG] No 'max_proj' found. Falling back to functional mean.", flush=True)
-                self.current_meanImg = func_mean
-            else:
-                mimg1 = np.percentile(mproj, 1)
-                mimg99 = np.percentile(mproj, 99)
-                mproj_norm = (mproj - mimg1) / (mimg99 - mimg1 + 1e-12)
-
-                # Create a full–sized blank image and insert mproj_norm into the valid region.
-                Ly, Lx = plane.get("Ly", mproj_norm.shape[0]), plane.get("Lx", mproj_norm.shape[1])
-                self.current_meanImg = np.zeros((Ly, Lx), np.float32)
-                try:
-                    self.current_meanImg[plane["yrange"][0]:plane["yrange"][1],
-                                         plane["xrange"][0]:plane["xrange"][1]] = mproj_norm
-                except Exception as e:
-                    print("[DEBUG] Error setting max projection region:", e, flush=True)
-                    self.current_meanImg = mproj_norm  # Fallback
+            self.current_meanImg = self._get_max_projection_image(plane_num, plane, func_mean)
 
         elif self.current_view_key == "func_enh":
             # Suite2p typically provides meanImgE for channel 1 only.
@@ -1090,15 +1342,18 @@ class MainWindow(QMainWindow):
         if self.current_meanImg is None and self.current_combined is None:
             return
 
-        factor = self.contrast_slider.value() / 100.0
+        dark_pct, white_pct = self._current_display_levels()
 
         def _norm_to_uint8(img2d: np.ndarray) -> np.ndarray:
-            im = img2d.astype(np.float32)
-            p1 = np.percentile(im, 1)
-            p99 = np.percentile(im, 99)
-            disp = (im - p1) / (p99 - p1 + 1e-12)
-            disp = np.clip(disp, 0, 1)
-            disp = 0.5 + factor * (disp - 0.5)
+            im = np.asarray(img2d, dtype=np.float32)
+            if im.size == 0:
+                return np.zeros((0, 0), dtype=np.uint8)
+            p_dark = np.percentile(im, dark_pct)
+            p_white = np.percentile(im, white_pct)
+            denom = p_white - p_dark
+            if not np.isfinite(denom) or abs(denom) < 1e-12:
+                return np.zeros_like(im, dtype=np.uint8)
+            disp = (im - p_dark) / denom
             disp = np.clip(disp, 0, 1)
             return (disp * 255).astype(np.uint8)
 
@@ -1168,11 +1423,31 @@ class MainWindow(QMainWindow):
                         xrange_ = ops.get("xrange", None)
                         Ly = ops.get("Ly")
                         Lx = ops.get("Lx")
+                        nframes = ops.get("nframes", None)
+                        datatype = ops.get("datatype", "int16")
                         if meanImg is None or yrange is None or xrange_ is None:
                             continue
                         if np.isnan(meanImg).any():
                             continue
-                        self.plane_data[plane_num] = {"meanImg": meanImg, "meanImgE": meanImgE, "meanImg_chan2": ops.get("meanImg_chan2", None), "meanImg_chan2_corrected": ops.get("meanImg_chan2_corrected", None), "nchannels": ops.get("nchannels", 1), "functional_chan": ops.get("functional_chan", 1), "yrange": yrange, "xrange": xrange_, "folder": subfolder, "max_proj": max_proj, "Ly": Ly, "Lx": Lx }
+                        reg_file = _resolve_existing_path(subfolder, ops.get("reg_file", None), "data.bin")
+                        self.plane_data[plane_num] = {
+                            "meanImg": meanImg,
+                            "meanImgE": meanImgE,
+                            "meanImg_chan2": ops.get("meanImg_chan2", None),
+                            "meanImg_chan2_corrected": ops.get("meanImg_chan2_corrected", None),
+                            "nchannels": ops.get("nchannels", 1),
+                            "functional_chan": ops.get("functional_chan", 1),
+                            "yrange": yrange,
+                            "xrange": xrange_,
+                            "folder": subfolder,
+                            "ops_path": ops_file,
+                            "reg_file": reg_file,
+                            "nframes": nframes,
+                            "datatype": datatype,
+                            "max_proj": max_proj,
+                            "Ly": Ly,
+                            "Lx": Lx,
+                        }
                         self.plane_order.append(plane_num)
                     except Exception as e:
                         print(f"[DEBUG] Error loading ops.npy in {subfolder}: {e}")
