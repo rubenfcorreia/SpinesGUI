@@ -1,15 +1,19 @@
 from xml.etree.ElementPath import ops
-import organise_paths
 import os
 import glob
+import sys
+from pathlib import Path
+
 import numpy as np
 import shutil
 import grp
 
+from preprocess_pipeline.shared import paths
+
 def split_combined_suite2p_v2(userID, expID):
     animalID, remote_repository_root, \
         processed_root, exp_dir_processed, \
-            exp_dir_raw = organise_paths.find_paths(userID, expID)
+            exp_dir_raw = paths.find_paths(userID, expID)
     
     # check if two channels have been extracted
     if os.path.exists(os.path.join(exp_dir_processed, 'ch2')):
@@ -70,7 +74,7 @@ def split_combined_suite2p_v2(userID, expID):
                 # save to experiment directory
                 animalID2, remote_repository_root2, \
                     processed_root2, exp_dir_processed2, \
-                        exp_dir_raw2 = organise_paths.find_paths(userID, expID)
+                        exp_dir_raw2 = paths.find_paths(userID, expID)
                 if exp_dir_processed[-3:] == 'ch2':
                     # then we are splitting ch2
                     exp_dir_processed2 = os.path.join(exp_dir_processed2 + 'ch2')
@@ -155,9 +159,9 @@ def split_combined_suite2p_v2(userID, expID):
                 expID = expIDs[iExp]
                 animalID2, remote_repository_root2, \
                     processed_root2, exp_dir_processed2, \
-                        exp_dir_raw2 = organise_paths.find_paths(userID, expID)
+                        exp_dir_raw2 = paths.find_paths(userID, expID)
                 try:
-                    # animalID, remote_repository_root, processed_root, exp_dir_processed, exp_dir_raw = organise_paths.find_paths(userID, expID)
+                    # animalID, remote_repository_root, processed_root, exp_dir_processed, exp_dir_raw = paths.find_paths(userID, expID)
                     path = os.path.join(exp_dir_processed2,'suite2p')
                     group_id = grp.getgrnam('users').gr_gid
                     mode = 0o770
@@ -221,7 +225,7 @@ def patch_all_ops_paths(userID, expID):
       - rebase reg_file and reg_file_chan2 if they exist
       - save back out
     """
-    _, _, _, exp_dir_processed, _ = organise_paths.find_paths(userID, expID)
+    _, _, _, exp_dir_processed, _ = paths.find_paths(userID, expID)
     suite2p_folder = os.path.join(exp_dir_processed, 'suite2p_combined')
 
     # find every ops.npy
