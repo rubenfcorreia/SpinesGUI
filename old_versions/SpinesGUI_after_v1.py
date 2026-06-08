@@ -1,13 +1,13 @@
 import pickle
 import os
-import organise_paths
+from preprocess_pipeline.shared import paths
 import glob
 import shutil
 
 userID = 'rubencorreia'
-expID = '2025-04-03_05_ESRC004' #in case it's a combined experiment ID, put expID which contains the combined data
+expID = '2026-05-21_01_ESRC028' #in case it's a combined experiment ID, put expID which contains the combined data
 
-animalID, remote_repository_root, processed_root, exp_dir_processed, exp_dir_raw = organise_paths.find_paths(userID, expID)
+animalID, remote_repository_root, processed_root, exp_dir_processed, exp_dir_raw = paths.find_paths(userID, expID)
 suite2p_folder = os.path.join(exp_dir_processed,'suite2p')
 new_folder =  os.path.join(suite2p_folder,"suite2p_original_files") 
 print("suite2p_original_files folder has been created") #create folder for which step1 preprocessing files will be moved, with exception of the data.bin
