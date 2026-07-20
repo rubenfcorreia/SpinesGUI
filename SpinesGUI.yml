@@ -32,6 +32,7 @@ dependencies:
       - suite2p==1.1.0
       - cellpose==4.2.1.1
       - opencv-python-headless==4.13.0.92
+      - pynwb==4.0.0
       - pyqtgraph==0.14.0
       - roifile==2026.2.10
       - scanimage-tiff-reader==1.4.1.4

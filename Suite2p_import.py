@@ -21,7 +21,7 @@ if str(_LAB_PIPELINE_SRC) not in sys.path:
 from preprocess_pipeline.shared import paths
 
 userID = 'rubencorreia'
-expID = '2026-07-16_01_ESRC040' 
+expID = '2025-12-11_07_ESRC023' 
 plane = "plane0"
 # the preprocess_pipeline.shared.paths.find_paths(userID, expID) helper gives you various useful
 # paths based on an experiment ID
