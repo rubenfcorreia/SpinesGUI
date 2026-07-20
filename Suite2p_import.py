@@ -1,22 +1,47 @@
 import pickle
 import os
-import organise_paths
+import sys
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib import pyplot as plt
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
 from suite2p_numpy_compat import load_suite2p_dict, load_suite2p_npy
+
+_LAB_PIPELINE_SRC = Path(__file__).resolve().parent.parent / "lab_pipeline" / "src"
+if str(_LAB_PIPELINE_SRC) not in sys.path:
+    sys.path.insert(0, str(_LAB_PIPELINE_SRC))
+
+from preprocess_pipeline.shared import paths
 
 userID = 'rubencorreia'
 expID = '2026-07-16_01_ESRC040' 
 plane = "plane0"
-# the organise_paths.find_paths(userID, expID) gives you various useful
+# the preprocess_pipeline.shared.paths.find_paths(userID, expID) helper gives you various useful
 # paths based on an experiment ID
-animalID, remote_repository_root, processed_root, exp_dir_processed, exp_dir_raw = organise_paths.find_paths(userID, expID)
+animalID, remote_repository_root, processed_root, exp_dir_processed, exp_dir_raw = paths.find_paths(
+    userID,
+    expID,
+)
 # os.path.join combined strings to make a path that will work on whatever 
 # operating system the function is run on
-suite2p_folder = os.path.join(exp_dir_processed,'suite2p_combined')
+suite2p_candidates = [
+    os.path.join(exp_dir_processed, "suite2p_combined"),
+    os.path.join(exp_dir_processed, "suite2p"),
+]
+suite2p_folder = next((candidate for candidate in suite2p_candidates if os.path.isdir(candidate)), None)
+if suite2p_folder is None:
+    raise FileNotFoundError(
+        f"No Suite2p output folder found under {exp_dir_processed!r}. "
+        "Expected suite2p_combined/ or suite2p/."
+    )
+
 print(os.listdir(suite2p_folder))
 exp_plane = os.path.join(suite2p_folder, plane)
 
