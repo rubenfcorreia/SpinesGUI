@@ -6,6 +6,7 @@ import numpy as np
 import shutil
 import grp
 
+from suite2p_numpy_compat import load_suite2p_dict, load_suite2p_npy
 
 # ---------------------------------------------------------------------
 # SpinesGUI artifact handling (add-ins)
@@ -145,8 +146,8 @@ def split_combined_suite2p_v3(userID, expID, *, copy_spinesgui_artifacts=True, d
 
         planes_list = glob.glob(os.path.join(suite2p_combined_path, '*plane*'))
         # determine all experiment IDs that have been combined
-        combined_ops = np.load(os.path.join(exp_dir_processed,'suite2p_combined','plane0','ops.npy'),allow_pickle = True).item()
-        iscell = np.load(os.path.join(exp_dir_processed,'suite2p_combined','plane0','iscell.npy'))
+        combined_ops = load_suite2p_dict(os.path.join(exp_dir_processed,'suite2p_combined','plane0','ops.npy'))
+        iscell = load_suite2p_npy(os.path.join(exp_dir_processed,'suite2p_combined','plane0','iscell.npy'))
 
         expIDs = {}
         for iExp in range(len(combined_ops['data_path'])):
@@ -163,9 +164,9 @@ def split_combined_suite2p_v3(userID, expID, *, copy_spinesgui_artifacts=True, d
         for iPlane in range(len(planes_list)):
             print('Plane ' + str(iPlane))
             # load the combined data
-            F = np.load(os.path.join(exp_dir_processed,'suite2p_combined','plane'+str(iPlane),'F.npy'))
-            Fneu = np.load(os.path.join(exp_dir_processed,'suite2p_combined','plane'+str(iPlane),'Fneu.npy'))
-            spks = np.load(os.path.join(exp_dir_processed,'suite2p_combined','plane'+str(iPlane),'spks.npy'))
+            F = load_suite2p_npy(os.path.join(exp_dir_processed,'suite2p_combined','plane'+str(iPlane),'F.npy'))
+            Fneu = load_suite2p_npy(os.path.join(exp_dir_processed,'suite2p_combined','plane'+str(iPlane),'Fneu.npy'))
+            spks = load_suite2p_npy(os.path.join(exp_dir_processed,'suite2p_combined','plane'+str(iPlane),'spks.npy'))
             # iterate through experiments grabbing each's frames
             for iExp in range(len(expIDs)):
                 expID = expIDs[iExp]
@@ -208,7 +209,7 @@ def split_combined_suite2p_v3(userID, expID, *, copy_spinesgui_artifacts=True, d
 
                 #Changing the paths and frame details in the splited ops.file
                 print('Updating ops file...')
-                ops = np.load(os.path.join(exp_dir_processed2,'suite2p','plane'+str(iPlane),'ops.npy'),allow_pickle = True).item()
+                ops = load_suite2p_dict(os.path.join(exp_dir_processed2,'suite2p','plane'+str(iPlane),'ops.npy'))
                 ops['nframes'] = frames_in_exp
                 ops['ops_path'] = os.path.join(exp_dir_processed2,'suite2p','plane'+str(iPlane),'ops.npy')
                 ops['reg_file'] = os.path.join(exp_dir_processed2,'suite2p','plane'+str(iPlane),'data.bin')
@@ -374,7 +375,7 @@ def patch_all_ops_paths(userID, expID):
     for ops_path in ops_files:
         folder = os.path.dirname(ops_path)
         #print(f"Patching {ops_path!r}…")
-        ops = np.load(ops_path, allow_pickle=True).item()
+        ops = load_suite2p_dict(ops_path)
 
         # reset the ops_path
         ops['ops_path'] = ops_path

@@ -2,6 +2,9 @@
 import os
 import shutil
 import numpy as np
+
+from suite2p_numpy_compat import load_suite2p_dict
+
 import organise_paths
 import glob
 
@@ -35,7 +38,7 @@ for plane in planes_list:
     print(f"[DEBUG] Found plane: {plane_name}", flush=True)
     plane_folder = os.path.join(root, plane_name)
     ops_dest = os.path.join(plane_folder, 'ops.npy')
-    ops = np.load(ops_dest, allow_pickle=True).item()
+    ops = load_suite2p_dict(ops_dest)
 
     # Make sure ops_path points at the new copy
     ops["ops_path"] = ops_dest

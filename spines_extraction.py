@@ -9,13 +9,13 @@ from typing import Optional
 
 import numpy as np
 
+from suite2p_numpy_compat import load_suite2p_dict
+
 
 def _load_required_dict(path: str) -> dict:
     if not os.path.exists(path):
         raise FileNotFoundError(f"Missing required file: {path}")
-    obj = np.load(path, allow_pickle=True)
-    # np.save(dict) loads as 0-d ndarray; .item() gives dict
-    return obj.item()
+    return load_suite2p_dict(path)
 
 
 def _safe_makedirs(path: str) -> None:
@@ -110,7 +110,7 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
         ops_dest = os.path.join(plane_folder, "ops.npy")
         shutil.copy(ops_src, ops_dest)
 
-        ops = np.load(ops_dest, allow_pickle=True).item()
+        ops = load_suite2p_dict(ops_dest)
         ops["ops_path"] = ops_dest
         if "reg_file" in ops:
             ops["reg_file"] = os.path.join(plane_folder, os.path.basename(ops["reg_file"]))

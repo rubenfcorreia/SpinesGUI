@@ -6,10 +6,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib import pyplot as plt
 
+from suite2p_numpy_compat import load_suite2p_dict, load_suite2p_npy
 
 userID = 'rubencorreia'
-expID = '2025-07-01_01_ESRC008' 
-plane = "plane2"
+expID = '2026-07-16_01_ESRC040' 
+plane = "plane0"
 # the organise_paths.find_paths(userID, expID) gives you various useful
 # paths based on an experiment ID
 animalID, remote_repository_root, processed_root, exp_dir_processed, exp_dir_raw = organise_paths.find_paths(userID, expID)
@@ -21,19 +22,19 @@ exp_plane = os.path.join(suite2p_folder, plane)
 
 activity_file = os.path.join(exp_plane,('F.npy'))
 
-activity = np.load(activity_file)
+activity = load_suite2p_npy(activity_file)
 print(activity)
 
 stat_file = os.path.join(exp_plane,('stat.npy'))
-stat = np.load(stat_file, allow_pickle=True)
+stat = load_suite2p_npy(stat_file)
 
 
 cell_file = os.path.join(exp_plane,('iscell.npy'))
-cell = np.load(cell_file, allow_pickle=True)
+cell = load_suite2p_npy(cell_file)
 print(cell)
 
 ops_file = os.path.join(exp_plane,('ops.npy'))
-ops = np.load(ops_file, allow_pickle=True).item()
+ops = load_suite2p_dict(ops_file)
 print("Loaded ops file")
 print(ops)
 print('Finished printing ops file')

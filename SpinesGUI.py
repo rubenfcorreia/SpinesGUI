@@ -31,6 +31,8 @@ from typing import Optional
 from collections import OrderedDict
 from matplotlib.path import Path
 
+from suite2p_numpy_compat import load_suite2p_dict
+
 from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer
 from PyQt5.QtGui import QPixmap, QImage, QPolygonF, QPen, QBrush, QColor
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QFileDialog, QMessageBox,
@@ -1090,7 +1092,7 @@ class MainWindow(QMainWindow):
         # Attempt to load the ROI file.
         if os.path.exists(rois_file):
             try:
-                loaded_rois = np.load(rois_file, allow_pickle=True).item()
+                loaded_rois = load_suite2p_dict(rois_file)
                 print("[DEBUG] Loaded ROIs file")
                 # Ensure the ROI keys are integers.
                 self.roi_data = {int(k): v for k, v in loaded_rois.items()}
@@ -1179,7 +1181,7 @@ class MainWindow(QMainWindow):
             raise FileNotFoundError("No ops.npy path available for this plane.")
         if not os.path.exists(ops_path):
             raise FileNotFoundError(f"ops.npy not found: {ops_path}")
-        ops = np.load(ops_path, allow_pickle=True).item()
+        ops = load_suite2p_dict(ops_path)
         ops["max_proj"] = np.asarray(max_proj)
         tmp_path = ops_path + ".tmp"
         with open(tmp_path, "wb") as tmp_file:
@@ -1415,7 +1417,7 @@ class MainWindow(QMainWindow):
                 ops_file = os.path.join(subfolder, "ops.npy")
                 if os.path.exists(ops_file):
                     try:
-                        ops = np.load(ops_file, allow_pickle=True).item()
+                        ops = load_suite2p_dict(ops_file)
                         meanImg = ops.get("meanImg", None)
                         meanImgE = ops.get("meanImgE", None)
                         max_proj = ops.get("max_proj", None)
@@ -1462,7 +1464,7 @@ class MainWindow(QMainWindow):
         rois_file = os.path.join(spines_gui_folder, roi_filename)
         if os.path.exists(rois_file):
             try:
-                loaded_rois = np.load(rois_file, allow_pickle=True).item()
+                loaded_rois = load_suite2p_dict(rois_file)
                 print("[DEBUG] Loaded ROIs file content")
                 self.roi_data = {int(k): v for k, v in loaded_rois.items()}
                 if self.roi_data:
