@@ -1290,7 +1290,6 @@ class MainWindow(QMainWindow):
         plane_num = self.plane_order[self.current_plane_index]
         plane = self.plane_data[plane_num]
 
-        nchannels = int(plane.get("nchannels", 1) or 1)
         func_chan = self._get_functional_channel(plane)
         self._update_channel_button_labels(func_chan)
         func_mean = _first_not_none(self._get_channel_mean(plane, func_chan), plane.get("meanImg", None))
@@ -1313,16 +1312,16 @@ class MainWindow(QMainWindow):
                 self.current_meanImg = func_mean
 
         elif self.current_view_key == "ch2_mean":
-            if nchannels < 2 or (plane.get("meanImg_chan2", None) is None and plane.get("meanImg_chan2_corrected", None) is None):
+            if other_mean is None:
                 print("[DEBUG] Channel 2 mean not available. Falling back to functional mean.", flush=True)
                 self.current_meanImg = func_mean
             else:
-                self.current_meanImg = self._get_channel_mean(plane, 2)
+                self.current_meanImg = other_mean
 
         elif self.current_view_key == "combined":
             ch1_mean = self._get_channel_mean(plane, 1)
             ch2_mean = self._get_channel_mean(plane, 2)
-            if nchannels < 2 or ch1_mean is None or ch2_mean is None:
+            if ch1_mean is None or ch2_mean is None:
                 print("[DEBUG] Combined view not available. Falling back to functional mean.", flush=True)
                 self.current_meanImg = func_mean
             else:

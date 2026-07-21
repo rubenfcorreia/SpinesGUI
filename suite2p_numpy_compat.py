@@ -40,6 +40,12 @@ def _register_alias(alias: str, target: str) -> bool:
     if existing is not None:
         return False
 
+    # NumPy 2 already ships the private ``numpy._core`` package. In that case
+    # we must leave the real module alone and avoid shadowing it with the NumPy 1
+    # alias, otherwise unrelated imports such as ``numpy.testing`` can break.
+    if importlib.util.find_spec(alias) is not None:
+        return False
+
     module = importlib.import_module(target)
     sys.modules.setdefault(alias, module)
     return True
