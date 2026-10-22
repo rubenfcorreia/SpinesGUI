@@ -32,6 +32,7 @@ from collections import OrderedDict
 from matplotlib.path import Path
 
 from suite2p_numpy_compat import load_suite2p_dict
+from registration_viewer import RegistrationViewer
 
 from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer
 from PyQt5.QtGui import QPixmap, QImage, QPolygonF, QPen, QBrush, QColor
@@ -934,6 +935,8 @@ class MainWindow(QMainWindow):
         self.extract_button.clicked.connect(self.extract_rois)
         self.queue_monitor_button = QPushButton("Queue Monitor")
         self.queue_monitor_button.clicked.connect(self.open_queue_monitor)
+        self.registration_viewer_button = QPushButton("Registration Viewer")
+        self.registration_viewer_button.clicked.connect(self.open_registration_viewer)
         self.clear_rois_button = QPushButton("Clear All ROIs")
         self.clear_rois_button.clicked.connect(self.clear_all_rois)
         self.left_arrow_button = QPushButton("<")
@@ -1014,6 +1017,7 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(self.roi_table_button)
         top_layout.addWidget(self.extract_button)
         top_layout.addWidget(self.queue_monitor_button)
+        top_layout.addWidget(self.registration_viewer_button)
         top_layout.addWidget(self.clear_rois_button)
         top_layout.addWidget(self.left_arrow_button)
         top_layout.addWidget(self.right_arrow_button)
@@ -1522,6 +1526,20 @@ class MainWindow(QMainWindow):
             return
         self.current_plane_index = new_index
         self.update_plane_display()
+    def open_registration_viewer(self):
+        if not self.plane_order:
+            QMessageBox.warning(self, "Registration Viewer", "Load a Suite2p folder first.")
+            return
+        plane_number = self.plane_order[self.current_plane_index]
+        try:
+            if getattr(self, "registration_viewer", None) is not None:
+                self.registration_viewer.close()
+            self.registration_viewer = RegistrationViewer(
+                self.plane_data[plane_number], plane_number, self
+            )
+            self.registration_viewer.show()
+        except Exception as exc:
+            QMessageBox.critical(self, "Registration Viewer", str(exc))
     def start_roi_addition(self):
         if not self.plane_order:
             QMessageBox.warning(self, "Error", "No plane loaded.")
