@@ -12,6 +12,7 @@ from suite2p_numpy_compat import load_suite2p_dict
 
 try:
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.backends.backend_qt5 import NavigationToolbar2QT as NavigationToolbar
     from PyQt5.QtCore import Qt, QTimer
     from PyQt5.QtGui import QImage, QPixmap
     from PyQt5.QtWidgets import (
@@ -22,7 +23,7 @@ try:
     GUI_AVAILABLE = True
 except ImportError:
     GUI_AVAILABLE = False
-    FigureCanvas = QTimer = QImage = QPixmap = None
+    FigureCanvas = NavigationToolbar = QTimer = QImage = QPixmap = None
     Qt = QFormLayout = QGridLayout = QHBoxLayout = QLabel = object
     QMainWindow = QPushButton = QSlider = QSpinBox = QSplitter = QTabWidget = object
     QVBoxLayout = QWidget = object
@@ -248,6 +249,18 @@ class RegistrationViewer(QMainWindow):
         self.pc_difference_axis = self.pc_canvas.figure.add_subplot(grid[1, 0])
         self.pc_merged_axis = self.pc_canvas.figure.add_subplot(grid[1, 1])
         self.pc_animation_axis = self.pc_canvas.figure.add_subplot(grid[1, 2])
+        self.pc_image_axes = (self.pc_difference_axis, self.pc_merged_axis, self.pc_animation_axis)
+        self._syncing_pc_image_view = False
+        self._pc_pan_state = None
+        for axis in self.pc_image_axes:
+            axis.callbacks.connect("xlim_changed", self._sync_pc_image_view)
+            axis.callbacks.connect("ylim_changed", self._sync_pc_image_view)
+        self.pc_canvas.mpl_connect("scroll_event", self._zoom_pc_image_with_scroll)
+        self.pc_canvas.mpl_connect("button_press_event", self._start_pc_image_pan)
+        self.pc_canvas.mpl_connect("button_release_event", self._finish_pc_image_pan)
+        self.pc_canvas.mpl_connect("motion_notify_event", self._move_pc_image_pan)
+        self.pc_toolbar = NavigationToolbar(self.pc_canvas, tab)
+        layout.addWidget(self.pc_toolbar)
         layout.addWidget(self.pc_canvas, 1)
         return tab
 
@@ -400,6 +413,111 @@ class RegistrationViewer(QMainWindow):
             self.pc_trace_shift_axis.legend(shift_handles, shift_labels, loc="upper right", fontsize=8)
         self.pc_canvas.figure.tight_layout()
 
+    def _pc_image_bounds(self):
+        for axis in self.pc_image_axes:
+            if axis.images:
+                left, right, bottom, top = axis.images[0].get_extent()
+                return (min(left, right), max(left, right)), (min(bottom, top), max(bottom, top))
+        return None
+
+    @staticmethod
+    def _clip_pc_limit(limit, bounds):
+        """Keep a limit within bounds without changing its axis orientation."""
+        increasing = limit[1] >= limit[0]
+        full_low, full_high = bounds
+        low, high = sorted(limit)
+        span = min(high - low, full_high - full_low)
+        if span >= full_high - full_low:
+            low, high = full_low, full_high
+        else:
+            center = (low + high) / 2.0
+            low = max(full_low, min(center - span / 2.0, full_high - span))
+            high = low + span
+        return (low, high) if increasing else (high, low)
+
+    def _sync_pc_image_view(self, source_axis):
+        """Keep all PC image panels on the same bounded viewport."""
+        if self._syncing_pc_image_view or source_axis not in self.pc_image_axes:
+            return
+        bounds = self._pc_image_bounds()
+        if bounds is None:
+            return
+        self._syncing_pc_image_view = True
+        try:
+            xlim = self._clip_pc_limit(source_axis.get_xlim(), bounds[0])
+            ylim = self._clip_pc_limit(source_axis.get_ylim(), bounds[1])
+            source_axis.set_xlim(xlim)
+            source_axis.set_ylim(ylim)
+            for axis in self.pc_image_axes:
+                if axis is not source_axis:
+                    axis.set_xlim(xlim)
+                    axis.set_ylim(ylim)
+        finally:
+            self._syncing_pc_image_view = False
+
+    def _zoom_pc_image_with_scroll(self, event):
+        """Zoom all PC image panels around the mouse position."""
+        if event.inaxes not in self.pc_image_axes or event.xdata is None or event.ydata is None:
+            return
+        if event.step == 0:
+            return
+        factor = 1.0 / 1.2 if event.step > 0 else 1.2
+        axis = event.inaxes
+        x0, x1 = axis.get_xlim()
+        y0, y1 = axis.get_ylim()
+        new_xlim = (event.xdata - (event.xdata - x0) * factor,
+                    event.xdata + (x1 - event.xdata) * factor)
+        new_ylim = (event.ydata - (event.ydata - y0) * factor,
+                    event.ydata + (y1 - event.ydata) * factor)
+        bounds = self._pc_image_bounds()
+        if bounds is not None:
+            new_xlim = self._clip_pc_limit(new_xlim, bounds[0])
+            new_ylim = self._clip_pc_limit(new_ylim, bounds[1])
+        self._syncing_pc_image_view = True
+        try:
+            for image_axis in self.pc_image_axes:
+                image_axis.set_xlim(new_xlim)
+                image_axis.set_ylim(new_ylim)
+        finally:
+            self._syncing_pc_image_view = False
+        self.pc_canvas.draw_idle()
+
+    def _start_pc_image_pan(self, event):
+        """Start a synchronized left-button drag on an image panel."""
+        if event.button != 1 or event.inaxes not in self.pc_image_axes:
+            return
+        if event.xdata is None or event.ydata is None:
+            return
+        self._pc_pan_state = (event.inaxes, event.xdata, event.ydata,
+                              event.inaxes.get_xlim(), event.inaxes.get_ylim())
+
+    def _move_pc_image_pan(self, event):
+        if self._pc_pan_state is None:
+            return
+        source_axis, start_x, start_y, start_xlim, start_ylim = self._pc_pan_state
+        if event.inaxes is not source_axis or event.xdata is None or event.ydata is None:
+            return
+        dx = start_x - event.xdata
+        dy = start_y - event.ydata
+        new_xlim = (start_xlim[0] + dx, start_xlim[1] + dx)
+        new_ylim = (start_ylim[0] + dy, start_ylim[1] + dy)
+        bounds = self._pc_image_bounds()
+        if bounds is not None:
+            new_xlim = self._clip_pc_limit(new_xlim, bounds[0])
+            new_ylim = self._clip_pc_limit(new_ylim, bounds[1])
+        self._syncing_pc_image_view = True
+        try:
+            for axis in self.pc_image_axes:
+                axis.set_xlim(new_xlim)
+                axis.set_ylim(new_ylim)
+        finally:
+            self._syncing_pc_image_view = False
+        self.pc_canvas.draw_idle()
+
+    def _finish_pc_image_pan(self, event):
+        if event.button == 1:
+            self._pc_pan_state = None
+
     def _draw_pc_images(self):
         pc = self.data.pc(self.pc_index)
         if pc is None:
@@ -409,7 +527,14 @@ class RegistrationViewer(QMainWindow):
             self.pc_canvas.draw_idle()
             return
         top, bottom = pc
-        for axis in (self.pc_difference_axis, self.pc_merged_axis, self.pc_animation_axis):
+        image_axes = self.pc_image_axes
+        # Keep the users zoom/pan viewport when the animated image is redrawn.
+        viewports = {
+            axis: (axis.get_xlim(), axis.get_ylim())
+            for axis in image_axes
+            if axis.images
+        }
+        for axis in image_axes:
             axis.clear()
         difference, merged, normalized = compose_pc_images(top, bottom)
         animated = normalized[self.pc_animation_frame]
@@ -419,9 +544,12 @@ class RegistrationViewer(QMainWindow):
         self.pc_difference_axis.set_title("difference")
         self.pc_merged_axis.set_title("merged")
         self.pc_animation_axis.set_title("top" if self.pc_animation_frame == 0 else "bottom")
-        for axis in (self.pc_difference_axis, self.pc_merged_axis, self.pc_animation_axis):
+        for axis in image_axes:
             axis.set_xticks([])
             axis.set_yticks([])
+            if axis in viewports:
+                axis.set_xlim(viewports[axis][0])
+                axis.set_ylim(viewports[axis][1])
         self.pc_canvas.draw_idle()
 
     def closeEvent(self, event):
