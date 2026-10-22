@@ -9,7 +9,14 @@ from typing import Optional
 
 import numpy as np
 
-from suite2p_numpy_compat import load_suite2p_dict
+from suite2p_compat import (
+    load_suite2p_functions,
+    normalize_suite2p_ops,
+    extraction_wrapper_compat,
+    roi_stats_compat,
+    suite2p_config_candidates,
+)
+from suite2p_numpy_compat import load_suite2p_dict, load_suite2p_npy
 
 
 def _load_required_dict(path: str) -> dict:
@@ -28,6 +35,12 @@ def _delete_if_exists(path: str) -> None:
             os.remove(path)
     except Exception as e:
         print(f"[DEBUG] Failed to delete {path}: {e}", flush=True)
+
+
+def _has_extraction_outputs(plane_folder: str) -> bool:
+    """Return whether fluorescence extraction completed for this plane."""
+    required = ("stat.npy", "F.npy", "Fneu.npy", "F_chan2.npy", "Fneu_chan2.npy")
+    return all(os.path.exists(os.path.join(plane_folder, name)) for name in required)
 
 
 def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[str] = None) -> None:
@@ -50,11 +63,12 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
     roi_data = _load_required_dict(roi_data_path)
     plane_data = _load_required_dict(plane_data_path)
 
-    # ---- Imports from suite2p ----
-    from suite2p.detection import roi_stats  # noqa
-    from suite2p.extraction import extraction_wrapper  # noqa
-    from suite2p.io.binary import BinaryFile  # noqa
-    from suite2p.extraction.dcnv import oasis, preprocess  # noqa
+    # ---- Imports from suite2p (v1 first, legacy paths supported) ----
+    suite2p_api = load_suite2p_functions()
+    extraction_wrapper = suite2p_api["extraction_wrapper"]
+    BinaryFile = suite2p_api["BinaryFile"]
+    oasis = suite2p_api["oasis"]
+    preprocess = suite2p_api["preprocess"]
 
     success_file = os.path.join(spines_gui_folder, "extraction_successfull.txt")
 
@@ -105,12 +119,19 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
         if not os.path.exists(data_chan2_src):
             data_chan2_dest = None  # keep your logic
 
-        # ops.npy (copy + patch paths)
-        ops_src = os.path.join(src_plane_folder, "ops.npy")
+        # Suite2p v1 uses settings/config files; legacy runs use ops.npy.
+        config_candidates = suite2p_config_candidates(src_plane_folder)
+        if not config_candidates:
+            raise FileNotFoundError(
+                f"No Suite2p config found in {src_plane_folder}; expected "
+                "settings.npy, ops.npy, or db.npy"
+            )
         ops_dest = os.path.join(plane_folder, "ops.npy")
-        shutil.copy(ops_src, ops_dest)
-
-        ops = load_suite2p_dict(ops_dest)
+        configs = [load_suite2p_dict(path) for path in config_candidates]
+        ops = {}
+        for config in configs:
+            ops.update(config)
+        ops = normalize_suite2p_ops(ops)
         ops["ops_path"] = ops_dest
         if "reg_file" in ops:
             ops["reg_file"] = os.path.join(plane_folder, os.path.basename(ops["reg_file"]))
@@ -124,17 +145,9 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
         Ly = ops.get("Ly")
         Lx = ops.get("Lx")
         aspect = ops.get("aspect", 1.0)
-        if isinstance(aspect, (list, tuple, np.ndarray)):
-            aspect = aspect[0]
         diameter = ops.get("diameter", 10)
-        if isinstance(diameter, (list, tuple, np.ndarray)):
-            diameter = diameter[0]
         max_overlap = ops.get("max_overlap", 1.0)
-        if isinstance(max_overlap, (list, tuple, np.ndarray)):
-            max_overlap = max_overlap[0]
         do_crop = ops.get("soma_crop", 1)
-        if isinstance(do_crop, (list, tuple, np.ndarray)):
-            do_crop = do_crop[0]
 
         print(
             f"[DEBUG] Plane {plane} params: Ly={Ly}, Lx={Lx}, aspect={aspect}, "
@@ -142,84 +155,86 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
             flush=True
         )
 
-        # ---- Build stat0 from roi_data ----
-        stat0 = {}
-        roi_list = [(k, roi) for k, roi in roi_data.items() if roi.get("plane") == plane]
-        roi_list_sorted = sorted(roi_list, key=lambda x: x[0])
-
-        from matplotlib.path import Path  # local import ok
-
-        for idx, (roi_key, roi) in enumerate(roi_list_sorted):
-            vertices = np.array(roi.get("ROI coordinates", []))
-            if vertices.size == 0:
-                print(f"[DEBUG] ROI {roi_key} on plane {plane} has no vertices.", flush=True)
-                continue
-
-            x_min = int(np.floor(np.min(vertices[:, 0])))
-            x_max = int(np.ceil(np.max(vertices[:, 0])))
-            y_min = int(np.floor(np.min(vertices[:, 1])))
-            y_max = int(np.ceil(np.max(vertices[:, 1])))
-
-            xx, yy = np.meshgrid(np.arange(x_min, x_max + 1), np.arange(y_min, y_max + 1))
-            points = np.vstack((xx.flatten(), yy.flatten())).T
-
-            inside = Path(vertices).contains_points(points).reshape(yy.shape)
-            ypix = np.where(inside)[0] + y_min
-            xpix = np.where(inside)[1] + x_min
-            lam = np.ones(ypix.shape)
-
-            stat0[idx] = {"ypix": np.array(ypix), "xpix": np.array(xpix), "lam": np.array(lam)}
-            print(f"[DEBUG] Plane {plane}, ROI index {idx}: mask {len(ypix)} px", flush=True)
-            
-        stat0_file = os.path.join(plane_folder, "stat0.npy")
-        np.save(stat0_file, stat0)
-
-        # roi_stats expects array-like; object array supports fancy indexing
-        stat0_arr = np.array(list(stat0.values()), dtype=object)
-
-        # Guard against bad diameter
-        if diameter is None or float(diameter) <= 0:
-            print(f"[DEBUG] Plane {plane}: ops diameter={diameter} → using default 10", flush=True)
-            diameter = 10
-
-        stat1 = roi_stats(
-            stat0_arr, Ly, Lx,
-            aspect=aspect, diameter=diameter, max_overlap=max_overlap, do_crop=do_crop
-        )
-        stat1_filename = "stat1.npy" if mode == "normal" else "stat1_dendrite_axon_mode.npy"
-        stat1_file = os.path.join(plane_folder, stat1_filename)
-        np.save(stat1_file, stat1)
-
-        # ---- Open binaries and run extraction_wrapper ----
-        f_reg_data = BinaryFile(Ly, Lx, data_bin_dest, n_frames=ops.get("nframes"), dtype=ops.get("datatype", "int16"))
-
-        if data_chan2_dest is not None:
-            f_reg_chan2_data = BinaryFile(Ly, Lx, data_chan2_dest, n_frames=ops.get("nframes"), dtype=ops.get("datatype", "int16"))
+        if _has_extraction_outputs(plane_folder) and not force:
+            print(f"[DEBUG] Plane {plane}: extraction outputs exist; skipping ROI extraction", flush=True)
+            stat_out = load_suite2p_npy(os.path.join(plane_folder, "stat.npy"))
+            F = load_suite2p_npy(os.path.join(plane_folder, "F.npy"))
+            Fneu = load_suite2p_npy(os.path.join(plane_folder, "Fneu.npy"))
         else:
-            f_reg_chan2_data = None
+            # ---- Build stat0 from roi_data ----
+            stat0 = {}
+            roi_list = [(k, roi) for k, roi in roi_data.items() if roi.get("plane") == plane]
+            roi_list_sorted = sorted(roi_list, key=lambda x: x[0])
 
-        # If you want to capture extraction_wrapper prints, keep this.
-        old_stdout = sys.stdout
-        sys.stdout = mystdout = io.StringIO()
-        try:
-            outputs = extraction_wrapper(
-                stat1, f_reg_data, f_reg_chan2_data,
-                cell_masks=None, neuropil_masks=None, ops=ops
+            from matplotlib.path import Path  # local import ok
+
+            for idx, (roi_key, roi) in enumerate(roi_list_sorted):
+                vertices = np.array(roi.get("ROI coordinates", []))
+                if vertices.size == 0:
+                    print(f"[DEBUG] ROI {roi_key} on plane {plane} has no vertices.", flush=True)
+                    continue
+
+                x_min = int(np.floor(np.min(vertices[:, 0])))
+                x_max = int(np.ceil(np.max(vertices[:, 0])))
+                y_min = int(np.floor(np.min(vertices[:, 1])))
+                y_max = int(np.ceil(np.max(vertices[:, 1])))
+
+                xx, yy = np.meshgrid(np.arange(x_min, x_max + 1), np.arange(y_min, y_max + 1))
+                points = np.vstack((xx.flatten(), yy.flatten())).T
+                inside = Path(vertices).contains_points(points).reshape(yy.shape)
+                ypix = np.where(inside)[0] + y_min
+                xpix = np.where(inside)[1] + x_min
+                lam = np.ones(ypix.shape)
+                stat0[idx] = {"ypix": np.array(ypix), "xpix": np.array(xpix), "lam": np.array(lam)}
+                print(f"[DEBUG] Plane {plane}, ROI index {idx}: mask {len(ypix)} px", flush=True)
+
+            np.save(os.path.join(plane_folder, "stat0.npy"), stat0)
+            stat0_arr = np.array(list(stat0.values()), dtype=object)
+            diameter_values = np.asarray(diameter if diameter is not None else [], dtype=float).reshape(-1)
+            if diameter_values.size == 0 or np.all(diameter_values <= 0):
+                print(f"[DEBUG] Plane {plane}: ops diameter={diameter} → using default 10", flush=True)
+                diameter = 10
+
+            stat1 = roi_stats_compat(
+                stat0_arr, Ly, Lx, aspect=aspect, diameter=diameter,
+                max_overlap=max_overlap, do_crop=do_crop,
+                roi_stats=suite2p_api["roi_stats"],
             )
-        finally:
-            sys.stdout = old_stdout
+            stat1_filename = "stat1.npy" if mode == "normal" else "stat1_dendrite_axon_mode.npy"
+            np.save(os.path.join(plane_folder, stat1_filename), stat1)
 
-        extraction_printed = mystdout.getvalue()
-        if extraction_printed.strip():
-            print("[DEBUG] extraction_wrapper printed:", flush=True)
-            print(extraction_printed, flush=True)
+            f_reg_data = BinaryFile(
+                Ly, Lx, data_bin_dest, n_frames=ops.get("nframes"),
+                dtype=ops.get("datatype", "int16"),
+            )
+            if data_chan2_dest is not None:
+                f_reg_chan2_data = BinaryFile(
+                    Ly, Lx, data_chan2_dest, n_frames=ops.get("nframes"),
+                    dtype=ops.get("datatype", "int16"),
+                )
+            else:
+                f_reg_chan2_data = None
 
-        stat_out, F, Fneu, F_chan2, Fneu_chan2 = outputs
-        np.save(os.path.join(plane_folder, "stat.npy"), stat_out)
-        np.save(os.path.join(plane_folder, "F.npy"), F)
-        np.save(os.path.join(plane_folder, "Fneu.npy"), Fneu)
-        np.save(os.path.join(plane_folder, "F_chan2.npy"), F_chan2)
-        np.save(os.path.join(plane_folder, "Fneu_chan2.npy"), Fneu_chan2)
+            old_stdout = sys.stdout
+            sys.stdout = mystdout = io.StringIO()
+            try:
+                outputs = extraction_wrapper_compat(
+                    extraction_wrapper, stat1, f_reg_data, f_reg_chan2_data, ops
+                )
+            finally:
+                sys.stdout = old_stdout
+
+            extraction_printed = mystdout.getvalue()
+            if extraction_printed.strip():
+                print("[DEBUG] extraction_wrapper printed:", flush=True)
+                print(extraction_printed, flush=True)
+
+            stat_out, F, Fneu, F_chan2, Fneu_chan2 = outputs
+            np.save(os.path.join(plane_folder, "stat.npy"), stat_out)
+            np.save(os.path.join(plane_folder, "F.npy"), F)
+            np.save(os.path.join(plane_folder, "Fneu.npy"), Fneu)
+            np.save(os.path.join(plane_folder, "F_chan2.npy"), F_chan2)
+            np.save(os.path.join(plane_folder, "Fneu_chan2.npy"), Fneu_chan2)
 
         # ---- Spike deconvolution ----
         print(f"[DEBUG] Running spike deconvolution for plane {plane}", flush=True)

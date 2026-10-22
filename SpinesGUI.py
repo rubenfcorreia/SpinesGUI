@@ -43,39 +43,9 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QFileDialog, QM
                              QHeaderView, QMenu, QSlider, QButtonGroup, QRadioButton, QAbstractItemView,
                              QProgressDialog)
 
-# Import Suite2p functions and BinaryFile.
-try:
-    from suite2p.detection import roi_stats as original_roi_stats
-except ImportError:
-    original_roi_stats = None
-    print("Error: Could not import roi_stats from suite2p.detection.")
-try:
-    from suite2p.extraction import extraction_wrapper
-except ImportError:
-    extraction_wrapper = None
-    print("Error: Could not import extraction_wrapper from suite2p.extraction.")
-try:
-    from suite2p.io.binary import BinaryFile
-except ImportError:
-    BinaryFile = None
-    print("Error: Could not import BinaryFile from suite2p.io.binary.")
-try:
-    from suite2p.extraction.dcnv import oasis, preprocess
-except ImportError:
-    oasis = None
-    preprocess = None
-    print("Error: Could not import oasis and/or preprocess from suite2p.extraction.dcnv.")
-
 QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
 
 # --- Helper Functions ---
-def median_pix(ypix, xpix):
-    return [np.median(ypix), np.median(xpix)]
-
-def norm_by_average(values: np.ndarray, estimator=np.mean, first_n: int = 100, offset: float = 0.) -> np.ndarray:
-    return values / (estimator(values[:first_n]) + offset)
-
-
 def _first_not_none(*vals):
     """Return the first value that is not None (safe for NumPy arrays)."""
     for v in vals:
@@ -162,94 +132,6 @@ def compute_suite2p_max_projection(
 
     return np.asarray(max_img)
 
-
-# --- Minimal ROI Class (for roi_stats) ---
-class ROI:
-    def __init__(self, ypix, xpix, lam, med, do_crop):
-        self.ypix = ypix
-        self.xpix = xpix
-        self.lam = lam
-        self.med = med
-        self.do_crop = do_crop
-        self.mean_r_squared = 1.0
-        self.mean_r_squared0 = 1.0
-        self.mean_r_squared_compact = 1.0
-        self.solidity = 1.0
-        self.n_pixels = len(ypix)
-        self.npix_soma = len(ypix)
-        self.soma_crop = np.ones_like(ypix, dtype=bool)
-    @staticmethod
-    def get_overlap_count_image(rois, Ly, Lx):
-        overlap = np.zeros((Ly, Lx))
-        for roi in rois:
-            overlap[roi.ypix, roi.xpix] += 1
-        return overlap
-    def get_overlap_image(self, overlap_image):
-        return overlap_image[self.ypix, self.xpix] > 1
-    def fit_ellipse(self, dy, dx):
-        class DummyEllipse:
-            pass
-        de = DummyEllipse()
-        de.radius = 5.0
-        de.aspect_ratio = 1.0
-        return de
-    @staticmethod
-    def filter_overlappers(rois, overlap_image, max_overlap):
-        keep = []
-        for roi in rois:
-            ratio = np.mean(overlap_image[roi.ypix, roi.xpix] > 1)
-            keep.append(ratio <= max_overlap)
-        return keep
-
-# --- Patched roi_stats Function ---
-def patched_roi_stats(stat, Ly: int, Lx: int, aspect=None, diameter=None, max_overlap=None, do_crop=True):
-    print("[DEBUG] Inside patched_roi_stats")
-    if "med" not in stat[0]:
-        for s in stat:
-            s["med"] = median_pix(s["ypix"], s["xpix"])
-    d0 = 10 if diameter is None or (isinstance(diameter, int) and diameter == 0) else diameter
-    if aspect is not None:
-        diameter_val = d0[0] if isinstance(d0, (list, np.ndarray)) else d0
-        diameter_val = int(diameter_val)
-        dy, dx = int(aspect * diameter_val), diameter_val
-    else:
-        if isinstance(d0, (list, np.ndarray)):
-            dy, dx = int(d0[0]), int(d0[0])
-        else:
-            dy, dx = int(d0), int(d0)
-    rois = [ROI(ypix=s["ypix"], xpix=s["xpix"], lam=s["lam"], med=s["med"], do_crop=do_crop) for s in stat]
-    n_overlaps = ROI.get_overlap_count_image(rois=rois, Ly=Ly, Lx=Lx)
-    for roi, s in zip(rois, stat):
-        s["mrs"] = roi.mean_r_squared
-        s["mrs0"] = roi.mean_r_squared0
-        s["compact"] = roi.mean_r_squared_compact
-        s["solidity"] = roi.solidity
-        s["npix"] = roi.n_pixels
-        s["npix_soma"] = roi.npix_soma
-        s["soma_crop"] = roi.soma_crop
-        s["overlap"] = roi.get_overlap_image(n_overlaps)
-        ellipse = roi.fit_ellipse(dy, dx)
-        s["radius"] = ellipse.radius
-        s["aspect_ratio"] = ellipse.aspect_ratio
-    mrs_normeds = norm_by_average(values=np.array([s["mrs"] for s in stat]), estimator=np.nanmedian, offset=1e-10, first_n=100)
-    npix_normeds = norm_by_average(values=np.array([s["npix"] for s in stat]), first_n=100)
-    npix_soma_normeds = norm_by_average(values=np.array([s["npix_soma"] for s in stat]), first_n=100)
-    for s, mrs_normed, npix_normed, npix_soma_normed in zip(stat, mrs_normeds, npix_normeds, npix_soma_normeds):
-        s["mrs"] = mrs_normed
-        s["npix_norm_no_crop"] = npix_normeds
-        s["npix_norm"] = npix_soma_normeds
-        s["footprint"] = s.get("footprint", 0)
-    if max_overlap is not None and max_overlap < 1.0:
-        keep_rois = ROI.filter_overlappers(rois=rois, overlap_image=n_overlaps, max_overlap=max_overlap)
-        stat = [s for s, keep in zip(stat, keep_rois) if keep]
-        n_overlaps = ROI.get_overlap_count_image(rois=rois, Ly=Ly, Lx=Lx)
-        rois = [ROI(ypix=s["ypix"], xpix=s["xpix"], lam=s["lam"], med=s["med"], do_crop=do_crop) for s in stat]
-        for roi, s in zip(rois, stat):
-            s["overlap"] = roi.get_overlap_image(n_overlaps)
-    return stat
-
-roi_stats = patched_roi_stats
-print("[DEBUG] Using patched roi_stats:", roi_stats.__name__)
 
 # --- ModeHelpers for Dendrites/Axons Mode ---
 class ModeHelpers:
