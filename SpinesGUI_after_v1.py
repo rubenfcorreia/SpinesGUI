@@ -5,7 +5,7 @@ import glob
 import shutil
 
 userID = 'rubencorreia'
-expID = '2026-05-21_01_ESRC028' #in case it's a combined experiment ID, put expID which contains the combined data
+expID = '2026-10-20_01_ESRC039' #in case it's a combined experiment ID, put expID which contains the combined data
 
 animalID, remote_repository_root, processed_root, exp_dir_processed, exp_dir_raw = paths.find_paths(userID, expID)
 suite2p_folder = os.path.join(exp_dir_processed,'suite2p')

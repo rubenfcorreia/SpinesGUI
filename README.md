@@ -18,6 +18,7 @@ registered Suite2p movies.
   - [Logs](#logs)
   - [Queue Monitor](#queue-monitor)
 - [Combined Suite2p data and splitting](#combined-suite2p-data-and-splitting)
+  - [Restoring extracted outputs before the canonical split](#restoring-extracted-outputs-before-the-canonical-split)
 - [Post-SpinesGUI helper](#post-spinesgui-helper)
 - [Related tools](#related-tools)
 
@@ -274,6 +275,34 @@ downstream analysis. The split does not recursively copy the complete
 Therefore, the split output is suitable for analyses that use the propagated
 conversion files, but it is not automatically a complete standalone SpinesGUI
 project for reopening and continuing ROI editing in every split experiment.
+
+### Restoring extracted outputs before the canonical split
+
+If ROI extraction was run while the combined data was stored as
+`suite2p_combined/`, the extracted files are normally under
+`suite2p_combined/SpinesGUI/planeX/`. The canonical `lab_pipeline` splitter
+expects `F.npy`, `Fneu.npy`, `spks.npy`, `iscell.npy`, and `stat.npy` directly
+under `suite2p/planeX/`.
+
+Use this preparation step before running the pipeline split:
+
+1. Make a backup of the experiment directory.
+2. Set the correct `userID` and `expID` in `SpinesGUI_after_v1.py`.
+3. Run the restoration helper from the repository root:
+
+   ```bash
+   conda activate lab_pipeline
+   python SpinesGUI_after_v1.py
+   ```
+
+   The helper moves the existing root-level Suite2p contents into
+   `suite2p/suite2p_original_files/` and copies each
+   `SpinesGUI/planeX/` output into `suite2p/planeX/`.
+
+4. Run the canonical `lab_pipeline` split and split the per-experiment outputs.
+
+This helper is only a restoration step. Do not use an old helper that also runs
+a legacy split when the canonical `lab_pipeline` split will be used.
 
 ## Post-SpinesGUI helper
 
