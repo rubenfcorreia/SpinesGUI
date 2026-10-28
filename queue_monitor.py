@@ -88,16 +88,16 @@ class QueueMonitorDialog(QDialog):
         tables_layout = QHBoxLayout(tables_widget)
 
         # queued table
-        self.tbl_queued = QTableWidget(0, 5)
-        self.tbl_queued.setHorizontalHeaderLabels(["Job ID", "Exp ID", "Mode", "Force", "Created"])
+        self.tbl_queued = QTableWidget(0, 6)
+        self.tbl_queued.setHorizontalHeaderLabels(["Job ID", "Exp ID", "Mode", "Force", "Post", "Created"])
         self.tbl_queued.setSelectionBehavior(self.tbl_queued.SelectRows)
         self.tbl_queued.setSelectionMode(self.tbl_queued.ExtendedSelection)
         self.tbl_queued.horizontalHeader().setStretchLastSection(True)
         tables_layout.addWidget(self._with_title("Queued", self.tbl_queued), stretch=2)
 
         # last finished table
-        self.tbl_last = QTableWidget(0, 6)
-        self.tbl_last.setHorizontalHeaderLabels(["Job ID", "Exp ID", "Status", "Mode", "Started", "Finished"])
+        self.tbl_last = QTableWidget(0, 7)
+        self.tbl_last.setHorizontalHeaderLabels(["Job ID", "Exp ID", "Extraction", "Post", "Mode", "Started", "Finished"])
         self.tbl_last.setSelectionBehavior(self.tbl_last.SelectRows)
         self.tbl_last.setSelectionMode(self.tbl_last.SingleSelection)
         self.tbl_last.horizontalHeader().setStretchLastSection(True)
@@ -150,7 +150,8 @@ class QueueMonitorDialog(QDialog):
         else:
             self.lbl_running.setText(
                 f"RUNNING: job={running.id} exp_id={running.exp_id} mode={running.mode} "
-                f"force={running.force} started_at={running.started_at} log={running.log_path or '(none)'}"
+                f"force={running.force} extraction={running.status} post={running.post_status} "
+                f"started_at={running.started_at} log={running.log_path or '(none)'}"
             )
 
         # ---- queued table ----
@@ -160,7 +161,8 @@ class QueueMonitorDialog(QDialog):
             _set_item(self.tbl_queued, r, 1, j.exp_id)
             _set_item(self.tbl_queued, r, 2, j.mode)
             _set_item(self.tbl_queued, r, 3, "Yes" if j.force else "No")
-            _set_item(self.tbl_queued, r, 4, j.created_at or "")
+            _set_item(self.tbl_queued, r, 4, j.post_status)
+            _set_item(self.tbl_queued, r, 5, j.created_at or "")
 
         # ---- last table ----
         self.tbl_last.setRowCount(len(last))
@@ -168,9 +170,10 @@ class QueueMonitorDialog(QDialog):
             _set_item(self.tbl_last, r, 0, str(j.id))
             _set_item(self.tbl_last, r, 1, j.exp_id)
             _set_item(self.tbl_last, r, 2, j.status)
-            _set_item(self.tbl_last, r, 3, j.mode)
-            _set_item(self.tbl_last, r, 4, j.started_at or "")
-            _set_item(self.tbl_last, r, 5, j.finished_at or "")
+            _set_item(self.tbl_last, r, 3, j.post_status)
+            _set_item(self.tbl_last, r, 4, j.mode)
+            _set_item(self.tbl_last, r, 5, j.started_at or "")
+            _set_item(self.tbl_last, r, 6, j.finished_at or "")
 
         # ---- log tail ----
         # Prefer running job log if present; else show worker stdout

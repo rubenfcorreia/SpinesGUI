@@ -215,11 +215,21 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
             else:
                 f_reg_chan2_data = None
 
+            lam_percentile_override = None
+            if mode == "dendrites_axons":
+                lam_percentile_override = 0.0
+                print(
+                    "[DEBUG] dendrites_axons mode: disabling lam_percentile "
+                    "filter for manual ROI masks",
+                    flush=True,
+                )
+
             old_stdout = sys.stdout
             sys.stdout = mystdout = io.StringIO()
             try:
                 outputs = extraction_wrapper_compat(
-                    extraction_wrapper, stat1, f_reg_data, f_reg_chan2_data, ops
+                    extraction_wrapper, stat1, f_reg_data, f_reg_chan2_data, ops,
+                    lam_percentile_override=lam_percentile_override,
                 )
             finally:
                 sys.stdout = old_stdout

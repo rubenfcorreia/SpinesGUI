@@ -84,6 +84,63 @@ class Suite2pCompatTests(unittest.TestCase):
         self.assertEqual(outputs[0][0]["xpix"].tolist(), [1, 2])
         self.assertEqual(calls["settings"]["batch_size"], 64)
         self.assertEqual(calls["settings"]["neuropil_coefficient"], 0.6)
+        self.assertEqual(calls["settings"]["lam_percentile"], 50.0)
+
+    def test_v1_extraction_wrapper_can_override_lam_percentile(self):
+        calls = {}
+
+        def v1(stat, f_reg, f_reg_chan2=None, cell_masks=None,
+               neuropil_masks=None, settings=None):
+            calls["settings"] = settings
+            return ("F", "Fneu", "F2", "Fneu2")
+
+        extraction_wrapper_compat(
+            v1, _stat(), "data", None,
+            {"extraction": {"lam_percentile": 50.0}},
+            lam_percentile_override=0.0,
+        )
+        self.assertEqual(calls["settings"]["lam_percentile"], 0.0)
+
+    def test_large_radius_override_avoids_percentile_filter_path(self):
+        stat = np.array([
+            {
+                "ypix": np.array([1, 1]),
+                "xpix": np.array([1, 2]),
+                "lam": np.ones(2),
+                "radius": 150.0,
+            },
+        ], dtype=object)
+
+        def v1(stat, f_reg, f_reg_chan2=None, cell_masks=None,
+               neuropil_masks=None, settings=None):
+            if np.median([item["radius"] for item in stat]) * 5 > 500:
+                if settings["lam_percentile"] > 0:
+                    raise MemoryError("percentile filter would be oversized")
+            return ("F", "Fneu", "F2", "Fneu2")
+
+        outputs = extraction_wrapper_compat(
+            v1, stat, "data", None, {},
+            lam_percentile_override=0.0,
+        )
+        self.assertEqual(outputs[1:], ("F", "Fneu", "F2", "Fneu2"))
+
+    def test_legacy_extraction_override_does_not_mutate_ops(self):
+        calls = {}
+
+        def legacy(stat, f_reg, f_reg_chan2=None, cell_masks=None,
+                   neuropil_masks=None, ops=None):
+            calls["ops"] = ops
+            return (stat, "F", "Fneu", None, None)
+
+        original = {"lam_percentile": 50.0, "extraction": {"lam_percentile": 50.0}}
+        extraction_wrapper_compat(
+            legacy, _stat(), "data", None, original,
+            lam_percentile_override=0.0,
+        )
+        self.assertEqual(calls["ops"]["lam_percentile"], 0.0)
+        self.assertEqual(calls["ops"]["extraction"]["lam_percentile"], 0.0)
+        self.assertEqual(original["lam_percentile"], 50.0)
+        self.assertEqual(original["extraction"]["lam_percentile"], 50.0)
 
     def test_legacy_extraction_wrapper_keeps_five_output_contract(self):
         calls = {}

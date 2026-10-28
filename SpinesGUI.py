@@ -41,6 +41,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QFileDialog, QM
                              QGraphicsEllipseItem, QPushButton, QLabel, QVBoxLayout, QHBoxLayout,
                              QFormLayout, QDialog, QComboBox, QLineEdit, QTableWidget, QTableWidgetItem,
                              QHeaderView, QMenu, QSlider, QButtonGroup, QRadioButton, QAbstractItemView,
+                             QCheckBox,
                              QProgressDialog)
 
 QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
@@ -815,6 +816,8 @@ class MainWindow(QMainWindow):
         self.roi_table_button.clicked.connect(self.open_roi_table)
         self.extract_button = QPushButton("Extract ROIs")
         self.extract_button.clicked.connect(self.extract_rois)
+        self.post_extraction_checkbox = QCheckBox("Run SpinesGUI_after after successful extraction")
+        self.post_extraction_checkbox.setChecked(True)
         self.queue_monitor_button = QPushButton("Queue Monitor")
         self.queue_monitor_button.clicked.connect(self.open_queue_monitor)
         self.registration_viewer_button = QPushButton("Registration Viewer")
@@ -898,6 +901,7 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(self.add_roi_button)
         top_layout.addWidget(self.roi_table_button)
         top_layout.addWidget(self.extract_button)
+        top_layout.addWidget(self.post_extraction_checkbox)
         top_layout.addWidget(self.queue_monitor_button)
         top_layout.addWidget(self.registration_viewer_button)
         top_layout.addWidget(self.clear_rois_button)
@@ -1713,10 +1717,19 @@ class MainWindow(QMainWindow):
                 root_folder=self.root_folder,
                 mode=self.mode,
                 force=force,
+                post_requested=self.post_extraction_checkbox.isChecked(),
             )
 
-            print(f"[GUI] queued job_id={job_id} exp_id={exp_id} force={force}", flush=True)
-            QMessageBox.information(self, "Queued", f"Extraction job #{job_id} queued.\n{exp_id}\nforce={force}")
+            post_requested = self.post_extraction_checkbox.isChecked()
+            print(
+                f"[GUI] queued job_id={job_id} exp_id={exp_id} force={force} "
+                f"post_requested={post_requested}", flush=True,
+            )
+            QMessageBox.information(
+                self, "Queued",
+                f"Extraction job #{job_id} queued.\n{exp_id}\nforce={force}\n"
+                f"SpinesGUI_after={post_requested}",
+            )
 
         except Exception as e:
             import traceback

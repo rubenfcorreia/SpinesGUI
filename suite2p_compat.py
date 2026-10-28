@@ -235,12 +235,21 @@ def roi_stats_compat(stat, Ly: int, Lx: int, *, aspect=None, diameter=None,
 
 
 def extraction_wrapper_compat(extraction_wrapper: Callable, stat: Any, f_reg: Any,
-                               f_reg_chan2: Any, ops: Mapping[str, Any]) -> tuple:
+                               f_reg_chan2: Any, ops: Mapping[str, Any],
+                               *, lam_percentile_override: float | None = None) -> tuple:
     """Call legacy ``ops=`` or v1 ``settings=`` extraction APIs."""
     params = inspect.signature(extraction_wrapper).parameters
     kwargs: dict[str, Any] = {"cell_masks": None, "neuropil_masks": None}
     if "ops" in params:
-        kwargs["ops"] = ops
+        extraction_ops = dict(ops)
+        if lam_percentile_override is not None:
+            extraction_ops["lam_percentile"] = lam_percentile_override
+            nested = extraction_ops.get("extraction")
+            if isinstance(nested, Mapping):
+                nested = dict(nested)
+                nested["lam_percentile"] = lam_percentile_override
+                extraction_ops["extraction"] = nested
+        kwargs["ops"] = extraction_ops
     elif "settings" in params:
         settings = dict(ops.get("extraction", {})) if isinstance(ops.get("extraction"), Mapping) else {}
         settings.update({
@@ -249,7 +258,11 @@ def extraction_wrapper_compat(extraction_wrapper: Callable, stat: Any, f_reg: An
             "neuropil_extract": settings.get("neuropil_extract", True),
             "inner_neuropil_radius": settings.get("inner_neuropil_radius", 2),
             "min_neuropil_pixels": settings.get("min_neuropil_pixels", 350),
-            "lam_percentile": settings.get("lam_percentile", 50.0),
+            "lam_percentile": (
+                lam_percentile_override
+                if lam_percentile_override is not None
+                else settings.get("lam_percentile", 50.0)
+            ),
             "allow_overlap": settings.get("allow_overlap", True),
             "circular_neuropil": settings.get("circular_neuropil", False),
         })

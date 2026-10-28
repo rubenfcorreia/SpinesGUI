@@ -9,6 +9,7 @@ from datetime import datetime
 
 from queue_db import QueueDB
 from spines_extraction import run_extraction
+from SpinesGUI_after_v1 import run_spinesgui_after
 
 
 class Tee:
@@ -72,6 +73,18 @@ def main(db_path: str, poll: int):
                 err = traceback.format_exc()
                 q.mark_failed(job_id, err)
                 print(f"[worker] failed job={job_id}\n{err}")
+            else:
+                if job.post_requested:
+                    q.mark_post_running(job_id)
+                    try:
+                        print(f"[worker] running SpinesGUI_after for job={job_id}")
+                        run_spinesgui_after(root)
+                        q.mark_post_done(job_id)
+                        print(f"[worker] SpinesGUI_after done for job={job_id}")
+                    except Exception:
+                        err = traceback.format_exc()
+                        q.mark_post_failed(job_id, err)
+                        print(f"[worker] SpinesGUI_after failed for job={job_id}\n{err}")
             finally:
                 sys.stdout, sys.stderr = old_out, old_err
 
