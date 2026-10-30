@@ -127,19 +127,20 @@ switch modes when appropriate.
 
 ## ROI extraction
 
-Click **Extract ROIs** after drawing and saving the ROIs. The GUI first asks
-for confirmation; choosing No leaves the ROI files and queue unchanged. The dialog also
-offers **Force re-extraction**, which overwrites existing extraction outputs. The GUI does not run
-the extraction in the GUI process. It saves the ROI and plane dictionaries,
-then submits a job to the extraction queue.
+Click **Extract ROIs** after drawing and saving the ROIs. The GUI asks for
+confirmation before saving the ROI inputs or submitting a queue job; choosing
+No leaves both unchanged. The dialog includes **Force re-extraction
+(overwrite existing outputs)**. It is enabled for incomplete or partial runs
+and is automatically required when a previous successful extraction exists.
 
 The worker reads `roi_data.npy` and `plane_data.npy`, uses the Suite2p
-registered binaries and metadata from each plane, and writes outputs under:
-Before extraction, each source `data.bin` and optional `data_chan2.bin` is
-copied into `SpinesGUI/planeX/` only when the destination is missing or its
-file size differs from the source. Copies use a temporary file and atomic
-replacement so interrupted copies are retried safely.
+registered binaries and metadata from each plane. Before extraction, each
+source `data.bin` and optional `data_chan2.bin` is copied into
+`SpinesGUI/planeX/` only when the destination is missing or its file size
+differs from the source. Copies use a temporary file and atomic replacement,
+so interrupted or incomplete copies are retried safely.
 
+The worker writes outputs under:
 
 ```text
 SpinesGUI/planeX/
@@ -200,7 +201,9 @@ python -u worker.py \
 
 Starting the script while the tmux session already exists leaves the existing
 worker running. The worker polls for queued jobs, claims them in FIFO order,
-runs `run_extraction`, and records the result.
+runs `run_extraction`, and records the result. When a new worker starts, any
+jobs left in `running` by an interrupted previous worker are recovered as
+`canceled` rather than remaining stuck in the monitor.
 
 Jobs have these states:
 
@@ -243,9 +246,12 @@ The monitor refreshes automatically and shows:
 - queued jobs and their mode/force settings;
 - the four most recently finished jobs;
 - a live tail of the running job log or worker log;
+- checkbox selection for jobs to cancel;
+- one **Cancel selected** button for either queued or running jobs;
 - cancellation for queued jobs and safe cancellation requests for running jobs.
 
-Queued jobs cancel immediately. A running extraction uses cooperative cancellation:
+Check jobs in only one table before clicking **Cancel selected**. Queued jobs
+cancel immediately. A running extraction uses cooperative cancellation:
 the current Suite2p stage is allowed to finish, then the worker stops at the next
 safe checkpoint and records the job as canceled. Cancellation can leave partial
 outputs from completed stages; rerun extraction to produce a complete output set.
