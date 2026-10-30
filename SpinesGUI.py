@@ -31,6 +31,9 @@ from typing import Optional
 from collections import OrderedDict
 from matplotlib.path import Path
 
+from suite2p_numpy_compat import load_suite2p_dict
+from registration_viewer import RegistrationViewer
+
 from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer
 from PyQt5.QtGui import QPixmap, QImage, QPolygonF, QPen, QBrush, QColor
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QFileDialog, QMessageBox,
@@ -38,41 +41,12 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QFileDialog, QM
                              QGraphicsEllipseItem, QPushButton, QLabel, QVBoxLayout, QHBoxLayout,
                              QFormLayout, QDialog, QComboBox, QLineEdit, QTableWidget, QTableWidgetItem,
                              QHeaderView, QMenu, QSlider, QButtonGroup, QRadioButton, QAbstractItemView,
+                             QCheckBox,
                              QProgressDialog)
-
-# Import Suite2p functions and BinaryFile.
-try:
-    from suite2p.detection import roi_stats as original_roi_stats
-except ImportError:
-    original_roi_stats = None
-    print("Error: Could not import roi_stats from suite2p.detection.")
-try:
-    from suite2p.extraction import extraction_wrapper
-except ImportError:
-    extraction_wrapper = None
-    print("Error: Could not import extraction_wrapper from suite2p.extraction.")
-try:
-    from suite2p.io.binary import BinaryFile
-except ImportError:
-    BinaryFile = None
-    print("Error: Could not import BinaryFile from suite2p.io.binary.")
-try:
-    from suite2p.extraction.dcnv import oasis, preprocess
-except ImportError:
-    oasis = None
-    preprocess = None
-    print("Error: Could not import oasis and/or preprocess from suite2p.extraction.dcnv.")
 
 QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
 
 # --- Helper Functions ---
-def median_pix(ypix, xpix):
-    return [np.median(ypix), np.median(xpix)]
-
-def norm_by_average(values: np.ndarray, estimator=np.mean, first_n: int = 100, offset: float = 0.) -> np.ndarray:
-    return values / (estimator(values[:first_n]) + offset)
-
-
 def _first_not_none(*vals):
     """Return the first value that is not None (safe for NumPy arrays)."""
     for v in vals:
@@ -159,94 +133,6 @@ def compute_suite2p_max_projection(
 
     return np.asarray(max_img)
 
-
-# --- Minimal ROI Class (for roi_stats) ---
-class ROI:
-    def __init__(self, ypix, xpix, lam, med, do_crop):
-        self.ypix = ypix
-        self.xpix = xpix
-        self.lam = lam
-        self.med = med
-        self.do_crop = do_crop
-        self.mean_r_squared = 1.0
-        self.mean_r_squared0 = 1.0
-        self.mean_r_squared_compact = 1.0
-        self.solidity = 1.0
-        self.n_pixels = len(ypix)
-        self.npix_soma = len(ypix)
-        self.soma_crop = np.ones_like(ypix, dtype=bool)
-    @staticmethod
-    def get_overlap_count_image(rois, Ly, Lx):
-        overlap = np.zeros((Ly, Lx))
-        for roi in rois:
-            overlap[roi.ypix, roi.xpix] += 1
-        return overlap
-    def get_overlap_image(self, overlap_image):
-        return overlap_image[self.ypix, self.xpix] > 1
-    def fit_ellipse(self, dy, dx):
-        class DummyEllipse:
-            pass
-        de = DummyEllipse()
-        de.radius = 5.0
-        de.aspect_ratio = 1.0
-        return de
-    @staticmethod
-    def filter_overlappers(rois, overlap_image, max_overlap):
-        keep = []
-        for roi in rois:
-            ratio = np.mean(overlap_image[roi.ypix, roi.xpix] > 1)
-            keep.append(ratio <= max_overlap)
-        return keep
-
-# --- Patched roi_stats Function ---
-def patched_roi_stats(stat, Ly: int, Lx: int, aspect=None, diameter=None, max_overlap=None, do_crop=True):
-    print("[DEBUG] Inside patched_roi_stats")
-    if "med" not in stat[0]:
-        for s in stat:
-            s["med"] = median_pix(s["ypix"], s["xpix"])
-    d0 = 10 if diameter is None or (isinstance(diameter, int) and diameter == 0) else diameter
-    if aspect is not None:
-        diameter_val = d0[0] if isinstance(d0, (list, np.ndarray)) else d0
-        diameter_val = int(diameter_val)
-        dy, dx = int(aspect * diameter_val), diameter_val
-    else:
-        if isinstance(d0, (list, np.ndarray)):
-            dy, dx = int(d0[0]), int(d0[0])
-        else:
-            dy, dx = int(d0), int(d0)
-    rois = [ROI(ypix=s["ypix"], xpix=s["xpix"], lam=s["lam"], med=s["med"], do_crop=do_crop) for s in stat]
-    n_overlaps = ROI.get_overlap_count_image(rois=rois, Ly=Ly, Lx=Lx)
-    for roi, s in zip(rois, stat):
-        s["mrs"] = roi.mean_r_squared
-        s["mrs0"] = roi.mean_r_squared0
-        s["compact"] = roi.mean_r_squared_compact
-        s["solidity"] = roi.solidity
-        s["npix"] = roi.n_pixels
-        s["npix_soma"] = roi.npix_soma
-        s["soma_crop"] = roi.soma_crop
-        s["overlap"] = roi.get_overlap_image(n_overlaps)
-        ellipse = roi.fit_ellipse(dy, dx)
-        s["radius"] = ellipse.radius
-        s["aspect_ratio"] = ellipse.aspect_ratio
-    mrs_normeds = norm_by_average(values=np.array([s["mrs"] for s in stat]), estimator=np.nanmedian, offset=1e-10, first_n=100)
-    npix_normeds = norm_by_average(values=np.array([s["npix"] for s in stat]), first_n=100)
-    npix_soma_normeds = norm_by_average(values=np.array([s["npix_soma"] for s in stat]), first_n=100)
-    for s, mrs_normed, npix_normed, npix_soma_normed in zip(stat, mrs_normeds, npix_normeds, npix_soma_normeds):
-        s["mrs"] = mrs_normed
-        s["npix_norm_no_crop"] = npix_normeds
-        s["npix_norm"] = npix_soma_normeds
-        s["footprint"] = s.get("footprint", 0)
-    if max_overlap is not None and max_overlap < 1.0:
-        keep_rois = ROI.filter_overlappers(rois=rois, overlap_image=n_overlaps, max_overlap=max_overlap)
-        stat = [s for s, keep in zip(stat, keep_rois) if keep]
-        n_overlaps = ROI.get_overlap_count_image(rois=rois, Ly=Ly, Lx=Lx)
-        rois = [ROI(ypix=s["ypix"], xpix=s["xpix"], lam=s["lam"], med=s["med"], do_crop=do_crop) for s in stat]
-        for roi, s in zip(rois, stat):
-            s["overlap"] = roi.get_overlap_image(n_overlaps)
-    return stat
-
-roi_stats = patched_roi_stats
-print("[DEBUG] Using patched roi_stats:", roi_stats.__name__)
 
 # --- ModeHelpers for Dendrites/Axons Mode ---
 class ModeHelpers:
@@ -930,8 +816,12 @@ class MainWindow(QMainWindow):
         self.roi_table_button.clicked.connect(self.open_roi_table)
         self.extract_button = QPushButton("Extract ROIs")
         self.extract_button.clicked.connect(self.extract_rois)
+        self.post_extraction_checkbox = QCheckBox("Run SpinesGUI_after after successful extraction")
+        self.post_extraction_checkbox.setChecked(True)
         self.queue_monitor_button = QPushButton("Queue Monitor")
         self.queue_monitor_button.clicked.connect(self.open_queue_monitor)
+        self.registration_viewer_button = QPushButton("Registration Viewer")
+        self.registration_viewer_button.clicked.connect(self.open_registration_viewer)
         self.clear_rois_button = QPushButton("Clear All ROIs")
         self.clear_rois_button.clicked.connect(self.clear_all_rois)
         self.left_arrow_button = QPushButton("<")
@@ -1011,7 +901,9 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(self.add_roi_button)
         top_layout.addWidget(self.roi_table_button)
         top_layout.addWidget(self.extract_button)
+        top_layout.addWidget(self.post_extraction_checkbox)
         top_layout.addWidget(self.queue_monitor_button)
+        top_layout.addWidget(self.registration_viewer_button)
         top_layout.addWidget(self.clear_rois_button)
         top_layout.addWidget(self.left_arrow_button)
         top_layout.addWidget(self.right_arrow_button)
@@ -1090,7 +982,7 @@ class MainWindow(QMainWindow):
         # Attempt to load the ROI file.
         if os.path.exists(rois_file):
             try:
-                loaded_rois = np.load(rois_file, allow_pickle=True).item()
+                loaded_rois = load_suite2p_dict(rois_file)
                 print("[DEBUG] Loaded ROIs file")
                 # Ensure the ROI keys are integers.
                 self.roi_data = {int(k): v for k, v in loaded_rois.items()}
@@ -1179,7 +1071,7 @@ class MainWindow(QMainWindow):
             raise FileNotFoundError("No ops.npy path available for this plane.")
         if not os.path.exists(ops_path):
             raise FileNotFoundError(f"ops.npy not found: {ops_path}")
-        ops = np.load(ops_path, allow_pickle=True).item()
+        ops = load_suite2p_dict(ops_path)
         ops["max_proj"] = np.asarray(max_proj)
         tmp_path = ops_path + ".tmp"
         with open(tmp_path, "wb") as tmp_file:
@@ -1288,7 +1180,6 @@ class MainWindow(QMainWindow):
         plane_num = self.plane_order[self.current_plane_index]
         plane = self.plane_data[plane_num]
 
-        nchannels = int(plane.get("nchannels", 1) or 1)
         func_chan = self._get_functional_channel(plane)
         self._update_channel_button_labels(func_chan)
         func_mean = _first_not_none(self._get_channel_mean(plane, func_chan), plane.get("meanImg", None))
@@ -1311,16 +1202,16 @@ class MainWindow(QMainWindow):
                 self.current_meanImg = func_mean
 
         elif self.current_view_key == "ch2_mean":
-            if nchannels < 2 or (plane.get("meanImg_chan2", None) is None and plane.get("meanImg_chan2_corrected", None) is None):
+            if other_mean is None:
                 print("[DEBUG] Channel 2 mean not available. Falling back to functional mean.", flush=True)
                 self.current_meanImg = func_mean
             else:
-                self.current_meanImg = self._get_channel_mean(plane, 2)
+                self.current_meanImg = other_mean
 
         elif self.current_view_key == "combined":
             ch1_mean = self._get_channel_mean(plane, 1)
             ch2_mean = self._get_channel_mean(plane, 2)
-            if nchannels < 2 or ch1_mean is None or ch2_mean is None:
+            if ch1_mean is None or ch2_mean is None:
                 print("[DEBUG] Combined view not available. Falling back to functional mean.", flush=True)
                 self.current_meanImg = func_mean
             else:
@@ -1415,7 +1306,7 @@ class MainWindow(QMainWindow):
                 ops_file = os.path.join(subfolder, "ops.npy")
                 if os.path.exists(ops_file):
                     try:
-                        ops = np.load(ops_file, allow_pickle=True).item()
+                        ops = load_suite2p_dict(ops_file)
                         meanImg = ops.get("meanImg", None)
                         meanImgE = ops.get("meanImgE", None)
                         max_proj = ops.get("max_proj", None)
@@ -1462,7 +1353,7 @@ class MainWindow(QMainWindow):
         rois_file = os.path.join(spines_gui_folder, roi_filename)
         if os.path.exists(rois_file):
             try:
-                loaded_rois = np.load(rois_file, allow_pickle=True).item()
+                loaded_rois = load_suite2p_dict(rois_file)
                 print("[DEBUG] Loaded ROIs file content")
                 self.roi_data = {int(k): v for k, v in loaded_rois.items()}
                 if self.roi_data:
@@ -1521,6 +1412,20 @@ class MainWindow(QMainWindow):
             return
         self.current_plane_index = new_index
         self.update_plane_display()
+    def open_registration_viewer(self):
+        if not self.plane_order:
+            QMessageBox.warning(self, "Registration Viewer", "Load a Suite2p folder first.")
+            return
+        plane_number = self.plane_order[self.current_plane_index]
+        try:
+            if getattr(self, "registration_viewer", None) is not None:
+                self.registration_viewer.close()
+            self.registration_viewer = RegistrationViewer(
+                self.plane_data[plane_number], plane_number, self
+            )
+            self.registration_viewer.show()
+        except Exception as exc:
+            QMessageBox.critical(self, "Registration Viewer", str(exc))
     def start_roi_addition(self):
         if not self.plane_order:
             QMessageBox.warning(self, "Error", "No plane loaded.")
@@ -1774,7 +1679,6 @@ class MainWindow(QMainWindow):
             return
 
         spines_gui_folder = os.path.join(self.root_folder, "SpinesGUI")
-        os.makedirs(spines_gui_folder, exist_ok=True)
 
         # Decide if re-extraction based on success marker (same as worker)
         success_file = os.path.join(spines_gui_folder, "extraction_successfull.txt")
@@ -1789,6 +1693,27 @@ class MainWindow(QMainWindow):
             if QMessageBox.question(self, "Re-run Extraction", msg, QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
                 return
             force = True
+
+        post_requested = self.post_extraction_checkbox.isChecked()
+        confirmation = (
+            "Save the current ROI definitions and queue extraction?\n\n"
+            f"Mode: {self.mode}\n"
+            f"Post-extraction processing: {'Yes' if post_requested else 'No'}\n\n"
+            "Choose No to leave the files and queue unchanged."
+        )
+        confirmation_box = QMessageBox(self)
+        confirmation_box.setWindowTitle("Confirm ROI Extraction")
+        confirmation_box.setText(confirmation)
+        confirmation_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        force_checkbox = QCheckBox("Force re-extraction (overwrite existing outputs)")
+        force_checkbox.setChecked(force)
+        force_checkbox.setEnabled(not reextract)
+        confirmation_box.setCheckBox(force_checkbox)
+        if confirmation_box.exec_() != QMessageBox.Yes:
+            return
+        force = force_checkbox.isChecked()
+
+        os.makedirs(spines_gui_folder, exist_ok=True)
 
         # Ensure worker has required inputs on disk
         try:
@@ -1812,10 +1737,18 @@ class MainWindow(QMainWindow):
                 root_folder=self.root_folder,
                 mode=self.mode,
                 force=force,
+                post_requested=self.post_extraction_checkbox.isChecked(),
             )
 
-            print(f"[GUI] queued job_id={job_id} exp_id={exp_id} force={force}", flush=True)
-            QMessageBox.information(self, "Queued", f"Extraction job #{job_id} queued.\n{exp_id}\nforce={force}")
+            print(
+                f"[GUI] queued job_id={job_id} exp_id={exp_id} force={force} "
+                f"post_requested={post_requested}", flush=True,
+            )
+            QMessageBox.information(
+                self, "Queued",
+                f"Extraction job #{job_id} queued.\n{exp_id}\nforce={force}\n"
+                f"SpinesGUI_after={post_requested}",
+            )
 
         except Exception as e:
             import traceback

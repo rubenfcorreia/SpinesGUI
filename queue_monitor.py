@@ -22,6 +22,13 @@ def _set_item(table: QTableWidget, row: int, col: int, text: str) -> None:
     table.setItem(row, col, item)
 
 
+def _set_check_item(table: QTableWidget, row: int, col: int, checked: bool = False) -> None:
+    item = QTableWidgetItem()
+    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+    item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+    table.setItem(row, col, item)
+
+
 def tail_text(path: str, max_bytes: int = 80_000) -> str:
     """
     Read up to the last max_bytes of a text file.
@@ -66,15 +73,11 @@ class QueueMonitorDialog(QDialog):
 
         # top row: status + buttons
         top = QHBoxLayout()
-        self.lbl_running = QLabel("RUNNING: (none)")
-        self.lbl_running.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        top.addWidget(self.lbl_running, stretch=1)
-
         self.btn_refresh = QPushButton("Refresh now")
         self.btn_refresh.clicked.connect(self.refresh)
         top.addWidget(self.btn_refresh)
 
-        self.btn_cancel = QPushButton("Cancel selected queued")
+        self.btn_cancel = QPushButton("Cancel selected")
         self.btn_cancel.clicked.connect(self.cancel_selected)
         top.addWidget(self.btn_cancel)
 
@@ -86,18 +89,28 @@ class QueueMonitorDialog(QDialog):
         # Middle area: tables
         tables_widget = QDialog(self)
         tables_layout = QHBoxLayout(tables_widget)
+        running_queued_layout = QVBoxLayout()
+
+        # running table
+        self.tbl_running = QTableWidget(0, 8)
+        self.tbl_running.setHorizontalHeaderLabels(["Select", "Job ID", "Exp ID", "Mode", "Extraction", "Post", "Started", "Cancel"])
+        self.tbl_running.setSelectionBehavior(self.tbl_running.SelectRows)
+        self.tbl_running.setSelectionMode(self.tbl_running.SingleSelection)
+        self.tbl_running.horizontalHeader().setStretchLastSection(True)
+        running_queued_layout.addWidget(self._with_title("Running", self.tbl_running), stretch=1)
 
         # queued table
-        self.tbl_queued = QTableWidget(0, 5)
-        self.tbl_queued.setHorizontalHeaderLabels(["Job ID", "Exp ID", "Mode", "Force", "Created"])
+        self.tbl_queued = QTableWidget(0, 7)
+        self.tbl_queued.setHorizontalHeaderLabels(["Select", "Job ID", "Exp ID", "Mode", "Force", "Post", "Created"])
         self.tbl_queued.setSelectionBehavior(self.tbl_queued.SelectRows)
         self.tbl_queued.setSelectionMode(self.tbl_queued.ExtendedSelection)
         self.tbl_queued.horizontalHeader().setStretchLastSection(True)
-        tables_layout.addWidget(self._with_title("Queued", self.tbl_queued), stretch=2)
+        running_queued_layout.addWidget(self._with_title("Queued", self.tbl_queued), stretch=3)
+        tables_layout.addLayout(running_queued_layout, stretch=2)
 
         # last finished table
-        self.tbl_last = QTableWidget(0, 6)
-        self.tbl_last.setHorizontalHeaderLabels(["Job ID", "Exp ID", "Status", "Mode", "Started", "Finished"])
+        self.tbl_last = QTableWidget(0, 7)
+        self.tbl_last.setHorizontalHeaderLabels(["Job ID", "Exp ID", "Extraction", "Post", "Mode", "Started", "Finished"])
         self.tbl_last.setSelectionBehavior(self.tbl_last.SelectRows)
         self.tbl_last.setSelectionMode(self.tbl_last.SingleSelection)
         self.tbl_last.horizontalHeader().setStretchLastSection(True)
@@ -140,27 +153,48 @@ class QueueMonitorDialog(QDialog):
         return box
 
     def refresh(self) -> None:
-        running = self.qdb.get_running()
+        running = self.qdb.get_running_jobs(limit=500)
         queued = self.qdb.get_queued(limit=500)
         last = self.qdb.get_last_finished(4)
 
-        # ---- running label ----
-        if running is None:
-            self.lbl_running.setText("RUNNING: (none)")
-        else:
-            self.lbl_running.setText(
-                f"RUNNING: job={running.id} exp_id={running.exp_id} mode={running.mode} "
-                f"force={running.force} started_at={running.started_at} log={running.log_path or '(none)'}"
-            )
+        # Preserve checkbox selections while the auto-refresh rebuilds the tables.
+        checked_running_ids = {
+            int(self.tbl_running.item(row, 1).text())
+            for row in range(self.tbl_running.rowCount())
+            if self.tbl_running.item(row, 0)
+            and self.tbl_running.item(row, 0).checkState() == Qt.Checked
+            and self.tbl_running.item(row, 1)
+        }
+        checked_queued_ids = {
+            int(self.tbl_queued.item(row, 1).text())
+            for row in range(self.tbl_queued.rowCount())
+            if self.tbl_queued.item(row, 0)
+            and self.tbl_queued.item(row, 0).checkState() == Qt.Checked
+            and self.tbl_queued.item(row, 1)
+        }
+
+        # ---- running table ----
+        self.tbl_running.setRowCount(len(running))
+        for r, j in enumerate(running):
+            _set_check_item(self.tbl_running, r, 0, j.id in checked_running_ids)
+            _set_item(self.tbl_running, r, 1, str(j.id))
+            _set_item(self.tbl_running, r, 2, j.exp_id)
+            _set_item(self.tbl_running, r, 3, j.mode)
+            _set_item(self.tbl_running, r, 4, j.status)
+            _set_item(self.tbl_running, r, 5, j.post_status)
+            _set_item(self.tbl_running, r, 6, j.started_at or "")
+            _set_item(self.tbl_running, r, 7, "Requested" if j.cancel_requested else "")
 
         # ---- queued table ----
         self.tbl_queued.setRowCount(len(queued))
         for r, j in enumerate(queued):
-            _set_item(self.tbl_queued, r, 0, str(j.id))
-            _set_item(self.tbl_queued, r, 1, j.exp_id)
-            _set_item(self.tbl_queued, r, 2, j.mode)
-            _set_item(self.tbl_queued, r, 3, "Yes" if j.force else "No")
-            _set_item(self.tbl_queued, r, 4, j.created_at or "")
+            _set_check_item(self.tbl_queued, r, 0, j.id in checked_queued_ids)
+            _set_item(self.tbl_queued, r, 1, str(j.id))
+            _set_item(self.tbl_queued, r, 2, j.exp_id)
+            _set_item(self.tbl_queued, r, 3, j.mode)
+            _set_item(self.tbl_queued, r, 4, "Yes" if j.force else "No")
+            _set_item(self.tbl_queued, r, 5, j.post_status)
+            _set_item(self.tbl_queued, r, 6, j.created_at or "")
 
         # ---- last table ----
         self.tbl_last.setRowCount(len(last))
@@ -168,15 +202,17 @@ class QueueMonitorDialog(QDialog):
             _set_item(self.tbl_last, r, 0, str(j.id))
             _set_item(self.tbl_last, r, 1, j.exp_id)
             _set_item(self.tbl_last, r, 2, j.status)
-            _set_item(self.tbl_last, r, 3, j.mode)
-            _set_item(self.tbl_last, r, 4, j.started_at or "")
-            _set_item(self.tbl_last, r, 5, j.finished_at or "")
+            _set_item(self.tbl_last, r, 3, j.post_status)
+            _set_item(self.tbl_last, r, 4, j.mode)
+            _set_item(self.tbl_last, r, 5, j.started_at or "")
+            _set_item(self.tbl_last, r, 6, j.finished_at or "")
 
         # ---- log tail ----
         # Prefer running job log if present; else show worker stdout
         log_path = None
-        if running and running.log_path:
-            log_path = running.log_path
+        current_running = running[0] if running else None
+        if current_running and current_running.log_path:
+            log_path = current_running.log_path
         else:
             log_path = self._worker_stdout_path
 
@@ -194,34 +230,63 @@ class QueueMonitorDialog(QDialog):
             self.txt_log.setPlainText("(no log output yet)")
 
     def cancel_selected(self) -> None:
-        rows = set([idx.row() for idx in self.tbl_queued.selectionModel().selectedRows()])
-        if not rows:
-            QMessageBox.information(self, "Cancel", "Select one or more queued jobs to cancel.")
+        queued_rows = [
+            row for row in range(self.tbl_queued.rowCount())
+            if self.tbl_queued.item(row, 0)
+            and self.tbl_queued.item(row, 0).checkState() == Qt.Checked
+        ]
+        running_rows = [
+            row for row in range(self.tbl_running.rowCount())
+            if self.tbl_running.item(row, 0)
+            and self.tbl_running.item(row, 0).checkState() == Qt.Checked
+        ]
+
+        if queued_rows and running_rows:
+            QMessageBox.information(
+                self, "Cancel", "Check either a running job or queued jobs, not both."
+            )
+            return
+        if not queued_rows and not running_rows:
+            QMessageBox.information(self, "Cancel", "Check a running or queued job.")
             return
 
-        job_ids: List[int] = []
-        for r in sorted(rows):
-            item = self.tbl_queued.item(r, 0)
-            if item:
-                try:
-                    job_ids.append(int(item.text()))
-                except ValueError:
-                    pass
-
-        if not job_ids:
-            QMessageBox.warning(self, "Cancel", "Could not parse selected job IDs.")
-            return
-
-        if QMessageBox.question(
-            self,
-            "Cancel jobs",
-            f"Cancel {len(job_ids)} queued job(s)?\n\n{job_ids}",
-            QMessageBox.Yes | QMessageBox.No
-        ) != QMessageBox.Yes:
-            return
-
-        for jid in job_ids:
-            self.qdb.cancel_job(jid)
+        if running_rows:
+            item = self.tbl_running.item(running_rows[0], 1)
+            try:
+                job_id = int(item.text())
+            except (AttributeError, ValueError):
+                QMessageBox.warning(self, "Cancel", "Could not parse the checked job ID.")
+                return
+            if QMessageBox.question(
+                self,
+                "Cancel running job",
+                f"Request a safe cancellation for running job #{job_id}?\n\n"
+                "The current Suite2p stage will finish before the worker stops.",
+                QMessageBox.Yes | QMessageBox.No,
+            ) != QMessageBox.Yes:
+                return
+            self.qdb.request_cancel(job_id)
+        else:
+            job_ids: List[int] = []
+            for row in queued_rows:
+                item = self.tbl_queued.item(row, 1)
+                if item:
+                    try:
+                        job_ids.append(int(item.text()))
+                    except ValueError:
+                        pass
+            if not job_ids:
+                QMessageBox.warning(self, "Cancel", "Could not parse checked job IDs.")
+                return
+            if QMessageBox.question(
+                self,
+                "Cancel queued jobs",
+                f"Cancel {len(job_ids)} queued job(s)?\n\n{job_ids}",
+                QMessageBox.Yes | QMessageBox.No,
+            ) != QMessageBox.Yes:
+                return
+            for job_id in job_ids:
+                self.qdb.cancel_job(job_id)
 
         self.refresh()
 

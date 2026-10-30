@@ -8,7 +8,8 @@ import traceback
 from datetime import datetime
 
 from queue_db import QueueDB
-from spines_extraction import run_extraction
+from spines_extraction import ExtractionCanceled, run_extraction
+from SpinesGUI_after_v1 import run_spinesgui_after
 
 
 class Tee:
@@ -34,7 +35,12 @@ class Tee:
 
 def main(db_path: str, poll: int):
     q = QueueDB(db_path=db_path)
+    recovered = q.recover_interrupted_jobs(
+        "Worker restarted after the previous process stopped before job completion."
+    )
     print(f"[worker] started at {datetime.now().isoformat()} db={db_path}")
+    if recovered:
+        print(f"[worker] recovered {recovered} interrupted job(s) as canceled")
 
     while True:
         job = q.claim_next_job()
@@ -65,13 +71,45 @@ def main(db_path: str, poll: int):
             try:
                 print(f"[worker] running job={job_id} exp_id={exp_id}")
                 print(f"[worker] root={root} mode={mode} force={force}")
-                run_extraction(root_folder=root, mode=mode, force=force, log_path=log_path)
-                q.mark_done(job_id)
+                run_extraction(
+                    root_folder=root,
+                    mode=mode,
+                    force=force,
+                    log_path=log_path,
+                    cancel_check=lambda: q.is_cancel_requested(job_id),
+                )
+                if q.is_cancel_requested(job_id):
+                    raise ExtractionCanceled()
+                if not q.mark_done(job_id):
+                    raise ExtractionCanceled()
                 print(f"[worker] done job={job_id}")
+            except ExtractionCanceled:
+                q.mark_canceled(job_id)
+                print(f"[worker] canceled job={job_id}")
             except Exception:
                 err = traceback.format_exc()
                 q.mark_failed(job_id, err)
                 print(f"[worker] failed job={job_id}\n{err}")
+            else:
+                if job.post_requested:
+                    if q.is_cancel_requested(job_id):
+                        q.mark_canceled(job_id)
+                        print(f"[worker] canceled before post-processing job={job_id}")
+                        continue
+                    q.mark_post_running(job_id)
+                    try:
+                        print(f"[worker] running SpinesGUI_after for job={job_id}")
+                        run_spinesgui_after(root)
+                        if q.is_cancel_requested(job_id):
+                            q.mark_canceled(job_id)
+                            print(f"[worker] canceled after post-processing job={job_id}")
+                        else:
+                            q.mark_post_done(job_id)
+                            print(f"[worker] SpinesGUI_after done for job={job_id}")
+                    except Exception:
+                        err = traceback.format_exc()
+                        q.mark_post_failed(job_id, err)
+                        print(f"[worker] SpinesGUI_after failed for job={job_id}\n{err}")
             finally:
                 sys.stdout, sys.stderr = old_out, old_err
 

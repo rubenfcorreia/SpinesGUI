@@ -30,6 +30,8 @@ import glob
 import shutil
 import numpy as np
 
+from suite2p_numpy_compat import load_suite2p_dict
+
 import organise_paths
 from split_combined_s2p_modified_with_spinesgui import split_combined_suite2p_v3
 
@@ -92,7 +94,7 @@ def patch_all_ops_paths(userID: str, expID: str) -> None:
     for ops_path in ops_files:
         folder = os.path.dirname(ops_path)
         print(f"[SpinesGUI_after] Patching {ops_path!r}…")
-        ops = np.load(ops_path, allow_pickle=True).item()
+        ops = load_suite2p_dict(ops_path)
 
         ops["ops_path"] = ops_path
 

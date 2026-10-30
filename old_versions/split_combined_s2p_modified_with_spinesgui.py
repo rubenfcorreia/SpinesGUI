@@ -1,19 +1,127 @@
 from xml.etree.ElementPath import ops
+import organise_paths
 import os
 import glob
-import sys
-from pathlib import Path
-
 import numpy as np
 import shutil
 import grp
 
-from preprocess_pipeline.shared import paths
+from suite2p_numpy_compat import load_suite2p_dict, load_suite2p_npy
 
-def split_combined_suite2p_v2(userID, expID):
+# ---------------------------------------------------------------------
+# SpinesGUI artifact handling (add-ins)
+# ---------------------------------------------------------------------
+
+_SPINESGUI_COPY_GLOBS = [
+    "*conversion*.npy",          # conversion libraries
+    "extraction_*.txt",          # extraction log(s)
+    "*mode*.npy",                # mode file (e.g. ROIs_dendrite_axon_mode.npy)
+]
+
+def _list_spinesgui_artifacts(spinesgui_src_dir, extra_globs=None):
+    """Return a sorted list of artifact file paths under a SpinesGUI folder."""
+    patterns = list(_SPINESGUI_COPY_GLOBS)
+    if extra_globs:
+        patterns.extend(list(extra_globs))
+    files = []
+    for pat in patterns:
+        files.extend(glob.glob(os.path.join(spinesgui_src_dir, pat)))
+    # De-dup while keeping deterministic order
+    return sorted(set(files))
+
+def copy_spinesgui_artifacts_from_combined_to_split(
+    userID,
+    expIDs,
+    exp_dir_processed_base,
+    suite2p_combined_path,
+    is_ch2=False,
+    verbose=True,
+    extra_globs=None,
+):
+    """
+    If suite2p_combined/SpinesGUI exists, copy key SpinesGUI artifacts into each
+    split experiment's suite2p/SpinesGUI folder.
+
+    Copies:
+      • conversion libraries (*conversion*.npy)
+      • extraction log(s) (extraction_*.txt)
+      • mode file(s) (*mode*.npy)
+
+    Verification (optional):
+      • checks destination files exist and match source file sizes.
+    """
+    spinesgui_src = os.path.join(suite2p_combined_path, "SpinesGUI")
+    if not os.path.isdir(spinesgui_src):
+        if verbose:
+            print(f"No SpinesGUI folder found in {suite2p_combined_path!r}; skipping artifact copy.")
+        return True  # nothing to do, treat as success
+
+    src_files = _list_spinesgui_artifacts(spinesgui_src, extra_globs=extra_globs)
+    if len(src_files) == 0:
+        if verbose:
+            print(f"SpinesGUI folder found at {spinesgui_src!r} but no matching artifacts; skipping.")
+        return True
+
+    ok = True
+    for expID in expIDs:
+        _, _, _, exp_dir_processed2, _ = organise_paths.find_paths(userID, expID)
+        if is_ch2:
+            exp_dir_processed2 = os.path.join(exp_dir_processed2 + "ch2")
+
+        dest_spinesgui = os.path.join(exp_dir_processed2, "suite2p", "SpinesGUI")
+        os.makedirs(dest_spinesgui, exist_ok=True)
+
+        if verbose:
+            print(f"Copying SpinesGUI artifacts to {dest_spinesgui!r} ...")
+
+        for src in src_files:
+            dst = os.path.join(dest_spinesgui, os.path.basename(src))
+            shutil.copy2(src, dst)
+
+            try:
+                if not os.path.exists(dst):
+                    ok = False
+                    if verbose:
+                        print(f"  [FAIL] Missing after copy: {dst}")
+                else:
+                    if os.path.getsize(src) != os.path.getsize(dst):
+                        ok = False
+                        if verbose:
+                            print(f"  [FAIL] Size mismatch: {os.path.basename(src)}")
+            except Exception as e:
+                ok = False
+                if verbose:
+                    print(f"  [FAIL] Verification error for {dst}: {e}")
+
+    if verbose:
+        print("SpinesGUI artifact copy " + ("OK." if ok else "FAILED."))
+
+    return ok
+
+def delete_suite2p_combined_folder(suite2p_combined_path, verbose=True):
+    """
+    Delete suite2p_combined folder.
+    Caller must ensure it is safe to delete.
+    """
+    if not os.path.exists(suite2p_combined_path):
+        if verbose:
+            print(f"{suite2p_combined_path!r} does not exist; nothing to delete.")
+        return False
+
+    if verbose:
+        print(f"Deleting {suite2p_combined_path!r} ...")
+
+    shutil.rmtree(suite2p_combined_path)
+
+    if verbose:
+        print("Deleted suite2p_combined folder.")
+
+    return True
+
+def split_combined_suite2p_v3(userID, expID, *, copy_spinesgui_artifacts=True, delete_combined=False):
     animalID, remote_repository_root, \
         processed_root, exp_dir_processed, \
-            exp_dir_raw = paths.find_paths(userID, expID)
+            exp_dir_raw = organise_paths.find_paths(userID, expID)
     
     # check if two channels have been extracted
     if os.path.exists(os.path.join(exp_dir_processed, 'ch2')):
@@ -38,8 +146,8 @@ def split_combined_suite2p_v2(userID, expID):
 
         planes_list = glob.glob(os.path.join(suite2p_combined_path, '*plane*'))
         # determine all experiment IDs that have been combined
-        combined_ops = np.load(os.path.join(exp_dir_processed,'suite2p_combined','plane0','ops.npy'),allow_pickle = True).item()
-        iscell = np.load(os.path.join(exp_dir_processed,'suite2p_combined','plane0','iscell.npy'))
+        combined_ops = load_suite2p_dict(os.path.join(exp_dir_processed,'suite2p_combined','plane0','ops.npy'))
+        iscell = load_suite2p_npy(os.path.join(exp_dir_processed,'suite2p_combined','plane0','iscell.npy'))
 
         expIDs = {}
         for iExp in range(len(combined_ops['data_path'])):
@@ -56,9 +164,9 @@ def split_combined_suite2p_v2(userID, expID):
         for iPlane in range(len(planes_list)):
             print('Plane ' + str(iPlane))
             # load the combined data
-            F = np.load(os.path.join(exp_dir_processed,'suite2p_combined','plane'+str(iPlane),'F.npy'))
-            Fneu = np.load(os.path.join(exp_dir_processed,'suite2p_combined','plane'+str(iPlane),'Fneu.npy'))
-            spks = np.load(os.path.join(exp_dir_processed,'suite2p_combined','plane'+str(iPlane),'spks.npy'))
+            F = load_suite2p_npy(os.path.join(exp_dir_processed,'suite2p_combined','plane'+str(iPlane),'F.npy'))
+            Fneu = load_suite2p_npy(os.path.join(exp_dir_processed,'suite2p_combined','plane'+str(iPlane),'Fneu.npy'))
+            spks = load_suite2p_npy(os.path.join(exp_dir_processed,'suite2p_combined','plane'+str(iPlane),'spks.npy'))
             # iterate through experiments grabbing each's frames
             for iExp in range(len(expIDs)):
                 expID = expIDs[iExp]
@@ -74,7 +182,7 @@ def split_combined_suite2p_v2(userID, expID):
                 # save to experiment directory
                 animalID2, remote_repository_root2, \
                     processed_root2, exp_dir_processed2, \
-                        exp_dir_raw2 = paths.find_paths(userID, expID)
+                        exp_dir_raw2 = organise_paths.find_paths(userID, expID)
                 if exp_dir_processed[-3:] == 'ch2':
                     # then we are splitting ch2
                     exp_dir_processed2 = os.path.join(exp_dir_processed2 + 'ch2')
@@ -101,7 +209,7 @@ def split_combined_suite2p_v2(userID, expID):
 
                 #Changing the paths and frame details in the splited ops.file
                 print('Updating ops file...')
-                ops = np.load(os.path.join(exp_dir_processed2,'suite2p','plane'+str(iPlane),'ops.npy'),allow_pickle = True).item()
+                ops = load_suite2p_dict(os.path.join(exp_dir_processed2,'suite2p','plane'+str(iPlane),'ops.npy'))
                 ops['nframes'] = frames_in_exp
                 ops['ops_path'] = os.path.join(exp_dir_processed2,'suite2p','plane'+str(iPlane),'ops.npy')
                 ops['reg_file'] = os.path.join(exp_dir_processed2,'suite2p','plane'+str(iPlane),'data.bin')
@@ -159,9 +267,9 @@ def split_combined_suite2p_v2(userID, expID):
                 expID = expIDs[iExp]
                 animalID2, remote_repository_root2, \
                     processed_root2, exp_dir_processed2, \
-                        exp_dir_raw2 = paths.find_paths(userID, expID)
+                        exp_dir_raw2 = organise_paths.find_paths(userID, expID)
                 try:
-                    # animalID, remote_repository_root, processed_root, exp_dir_processed, exp_dir_raw = paths.find_paths(userID, expID)
+                    # animalID, remote_repository_root, processed_root, exp_dir_processed, exp_dir_raw = organise_paths.find_paths(userID, expID)
                     path = os.path.join(exp_dir_processed2,'suite2p')
                     group_id = grp.getgrnam('users').gr_gid
                     mode = 0o770
@@ -176,6 +284,37 @@ def split_combined_suite2p_v2(userID, expID):
                             os.chmod(file_path, mode)
                 except:
                     print('Problem setting file permissions to user in step 1 batch')
+
+        # -------------------------------------------------------------
+        # Optional: propagate SpinesGUI artifacts from suite2p_combined
+        # -------------------------------------------------------------
+        # After splitting is done for this channel, copy SpinesGUI artifacts (if any)
+        verified_ok = True
+        if copy_spinesgui_artifacts:
+            verified_ok = copy_spinesgui_artifacts_from_combined_to_split(
+                userID=userID,
+                expIDs=list(expIDs.values()),
+                exp_dir_processed_base=exp_dir_processed,
+                suite2p_combined_path=suite2p_combined_path,
+                is_ch2=(exp_dir_processed[-3:] == 'ch2'),
+                verbose=True,
+            )
+
+        # ---------------------------------------------------------------------
+        # Optional: delete suite2p_combined after successful split
+        # (verification is mandatory, so deletion is only allowed if verified_ok)
+        # ---------------------------------------------------------------------
+        if delete_combined:
+            if not verified_ok:
+                raise RuntimeError(
+                    "SpinesGUI verification failed (verified_ok=False) — refusing to delete suite2p_combined."
+                )
+
+            delete_suite2p_combined_folder(
+                suite2p_combined_path,
+                verbose=True,
+            )
+
 
 
 
@@ -225,7 +364,7 @@ def patch_all_ops_paths(userID, expID):
       - rebase reg_file and reg_file_chan2 if they exist
       - save back out
     """
-    _, _, _, exp_dir_processed, _ = paths.find_paths(userID, expID)
+    _, _, _, exp_dir_processed, _ = organise_paths.find_paths(userID, expID)
     suite2p_folder = os.path.join(exp_dir_processed, 'suite2p_combined')
 
     # find every ops.npy
@@ -236,7 +375,7 @@ def patch_all_ops_paths(userID, expID):
     for ops_path in ops_files:
         folder = os.path.dirname(ops_path)
         #print(f"Patching {ops_path!r}…")
-        ops = np.load(ops_path, allow_pickle=True).item()
+        ops = load_suite2p_dict(ops_path)
 
         # reset the ops_path
         ops['ops_path'] = ops_path
@@ -257,4 +396,4 @@ def patch_all_ops_paths(userID, expID):
 if __name__ == "__main__":
     userID = 'rubencorreia'
     expID  = '2025-11-11_01_ESRC022'    # <--- put the first experiment of the sequence here
-    split_combined_suite2p_v2(userID, expID)
+    split_combined_suite2p_v3(userID, expID, copy_spinesgui_artifacts=True, verify_spinesgui_copy=True, delete_combined=False)

@@ -3,7 +3,7 @@ import glob
 import shutil
 import numpy as np
 import organise_paths
-from split_combined_s2p_modified import split_combined_suite2p_v2
+from SpinesGUI.old_versions.split_combined_s2p_modified import split_combined_suite2p_v2
 
 def move_original_suite2p_files(userID, expID):
     """
