@@ -253,8 +253,10 @@ The monitor refreshes automatically and shows:
 Check jobs in only one table before clicking **Cancel selected**. Queued jobs
 cancel immediately. A running extraction uses cooperative cancellation:
 the current Suite2p stage is allowed to finish, then the worker stops at the next
-safe checkpoint and records the job as canceled. Cancellation can leave partial
-outputs from completed stages; rerun extraction to produce a complete output set.
+safe checkpoint and records the job as canceled. Checkpoints occur between
+binary-copy, configuration, ROI-statistics, fluorescence, deconvolution, and
+conversion stages. Cancellation can leave partial outputs from completed
+stages; rerun extraction to produce a complete output set.
 
 ## Combined Suite2p data and splitting
 

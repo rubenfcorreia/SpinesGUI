@@ -159,6 +159,7 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
         data_bin_src = os.path.join(src_plane_folder, "data.bin")
         data_bin_dest = os.path.join(plane_folder, "data.bin")
         _copy_if_incomplete(data_bin_src, data_bin_dest)
+        check_canceled()
 
         # data_chan2.bin (optional)
         data_chan2_src = os.path.join(src_plane_folder, "data_chan2.bin")
@@ -167,6 +168,7 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
             _copy_if_incomplete(data_chan2_src, data_chan2_dest)
         else:
             data_chan2_dest = None  # keep your logic
+        check_canceled()
 
         # Suite2p v1 uses settings/config files; legacy runs use ops.npy.
         config_candidates = suite2p_config_candidates(src_plane_folder)
@@ -177,6 +179,7 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
             )
         ops_dest = os.path.join(plane_folder, "ops.npy")
         configs = [load_suite2p_dict(path) for path in config_candidates]
+        check_canceled()
         ops = {}
         for config in configs:
             ops.update(config)
@@ -189,6 +192,7 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
             ops["reg_file_chan2"] = os.path.join(plane_folder, os.path.basename(ops["reg_file_chan2"]))
             print(f"[DEBUG] Patched ops['reg_file_chan2'] → {ops['reg_file_chan2']}", flush=True)
         np.save(ops_dest, ops)
+        check_canceled()
 
         # Extract parameters
         Ly = ops.get("Ly")
@@ -238,6 +242,7 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
                 print(f"[DEBUG] Plane {plane}, ROI index {idx}: mask {len(ypix)} px", flush=True)
 
             np.save(os.path.join(plane_folder, "stat0.npy"), stat0)
+            check_canceled()
             stat0_arr = np.array(list(stat0.values()), dtype=object)
             diameter_values = np.asarray(diameter if diameter is not None else [], dtype=float).reshape(-1)
             if diameter_values.size == 0 or np.all(diameter_values <= 0):
@@ -251,6 +256,7 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
             )
             stat1_filename = "stat1.npy" if mode == "normal" else "stat1_dendrite_axon_mode.npy"
             np.save(os.path.join(plane_folder, stat1_filename), stat1)
+            check_canceled()
 
             f_reg_data = BinaryFile(
                 Ly, Lx, data_bin_dest, n_frames=ops.get("nframes"),
@@ -295,6 +301,7 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
             np.save(os.path.join(plane_folder, "Fneu.npy"), Fneu)
             np.save(os.path.join(plane_folder, "F_chan2.npy"), F_chan2)
             np.save(os.path.join(plane_folder, "Fneu_chan2.npy"), Fneu_chan2)
+            check_canceled()
 
         check_canceled()
         # ---- Spike deconvolution ----
@@ -308,6 +315,7 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
             fs=ops["fs"],
             prctile_baseline=ops["prctile_baseline"],
         )
+        check_canceled()
         spks = oasis(F=dF, batch_size=ops["batch_size"], tau=ops["tau"], fs=ops["fs"])
         check_canceled()
         np.save(os.path.join(plane_folder, "spks.npy"), spks)
@@ -316,13 +324,9 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
         roi_ids = [roi_id for roi_id, info in roi_data.items() if info.get("plane") == plane]
         iscell_arr = np.ones((len(roi_ids), 2), dtype=int)
         np.save(os.path.join(plane_folder, "iscell.npy"), iscell_arr)
+        check_canceled()
 
     check_canceled()
-    # ---- Success file ----
-    with open(success_file, "w", encoding="utf-8") as sf:
-        sf.write("Extraction finished successfully.\n")
-    print(f"[DEBUG] Created extraction success file at {success_file}", flush=True)
-
     # ---- Conversion dict (save only; no GUI display) ----
     conversion_dict = {}
     plane_groups = {}
@@ -333,8 +337,10 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
         plane_groups.setdefault(p, []).append((key, roi))
 
     for plane, items in plane_groups.items():
+        check_canceled()
         items_sorted = sorted(items, key=lambda x: x[0])
         for idx, (roi_key, roi) in enumerate(items_sorted):
+            check_canceled()
             roi["conversion"] = [plane, idx]
             conversion_dict[roi_key] = roi
 
@@ -343,11 +349,17 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
         key=lambda x: (x[1]["conversion"][0], x[1]["conversion"][1])
     )
     for new_index, (roi_key, roi) in enumerate(sorted_conversion):
+        check_canceled()
         roi["conversion index"] = new_index
 
     conv_filename = "ROIs_conversion.npy" if mode == "normal" else "ROIs_dendrite_axon_mode_conversion.npy"
     rois_conv_file = os.path.join(spines_gui_folder, conv_filename)
     np.save(rois_conv_file, conversion_dict)
+    check_canceled()
     print(f"[DEBUG] Saved conversion dictionary to {rois_conv_file}", flush=True)
 
+    # ---- Success file ----
+    with open(success_file, "w", encoding="utf-8") as sf:
+        sf.write("Extraction finished successfully.\n")
+    print(f"[DEBUG] Created extraction success file at {success_file}", flush=True)
     print("[extract] finished successfully", flush=True)
