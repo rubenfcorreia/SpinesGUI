@@ -5,7 +5,8 @@ import os
 import sys
 import io
 import shutil
-from typing import Optional
+import tempfile
+from typing import Callable, Optional
 
 import numpy as np
 
@@ -37,13 +38,58 @@ def _delete_if_exists(path: str) -> None:
         print(f"[DEBUG] Failed to delete {path}: {e}", flush=True)
 
 
+def _copy_if_incomplete(source_path: str, destination_path: str) -> bool:
+    """Copy a binary when its destination is missing or has a different size."""
+    if not os.path.exists(source_path):
+        raise FileNotFoundError(f"Missing source binary: {source_path}")
+
+    source_size = os.path.getsize(source_path)
+    if os.path.exists(destination_path) and os.path.getsize(destination_path) == source_size:
+        print(f"[DEBUG] Binary copy complete; skipping {destination_path}", flush=True)
+        return False
+
+    if not os.path.exists(destination_path):
+        reason = "missing destination"
+    else:
+        reason = (
+            f"size mismatch (source={source_size}, "
+            f"destination={os.path.getsize(destination_path)})"
+        )
+    print(f"[DEBUG] Copying {source_path} → {destination_path}: {reason}", flush=True)
+
+    destination_dir = os.path.dirname(destination_path) or "."
+    fd, temporary_path = tempfile.mkstemp(
+        prefix=f".{os.path.basename(destination_path)}.tmp-",
+        dir=destination_dir,
+    )
+    os.close(fd)
+    try:
+        with open(source_path, "rb") as source, open(temporary_path, "wb") as temporary:
+            shutil.copyfileobj(source, temporary, length=16 * 1024)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_path, destination_path)
+    except Exception:
+        try:
+            os.remove(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
+    return True
+
+
 def _has_extraction_outputs(plane_folder: str) -> bool:
     """Return whether fluorescence extraction completed for this plane."""
     required = ("stat.npy", "F.npy", "Fneu.npy", "F_chan2.npy", "Fneu_chan2.npy")
     return all(os.path.exists(os.path.join(plane_folder, name)) for name in required)
 
 
-def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[str] = None) -> None:
+class ExtractionCanceled(Exception):
+    """Raised when the queue requests a safe stop between extraction stages."""
+
+
+def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[str] = None,
+                   cancel_check: Optional[Callable[[], bool]] = None) -> None:
     """
     Headless extraction entry point (runs in worker).
     - No Qt imports
@@ -54,6 +100,12 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
     print(f"[extract] root_folder={root_folder}", flush=True)
     print(f"[extract] mode={mode} force={force}", flush=True)
 
+    def check_canceled() -> None:
+        if cancel_check and cancel_check():
+            print("[extract] cancellation requested; stopping at safe checkpoint", flush=True)
+            raise ExtractionCanceled()
+
+    check_canceled()
     spines_gui_folder = os.path.join(root_folder, "SpinesGUI")
     _safe_makedirs(spines_gui_folder)
 
@@ -79,6 +131,7 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
         )
 
     # ---- If forcing, delete prior outputs (but keep data.bin, data_chan2.bin, logs) ----
+    check_canceled()
     if force:
         print("[DEBUG] force=True → cleaning previous extraction outputs", flush=True)
         for plane in plane_data.keys():
@@ -93,6 +146,7 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
 
     # ---- Main per-plane extraction ----
     for plane in plane_data.keys():
+        check_canceled()
         print(f"[DEBUG] Processing extraction for plane {plane}", flush=True)
 
         plane_folder = os.path.join(spines_gui_folder, f"plane{plane}")
@@ -104,19 +158,14 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
         # data.bin
         data_bin_src = os.path.join(src_plane_folder, "data.bin")
         data_bin_dest = os.path.join(plane_folder, "data.bin")
-        if not os.path.exists(data_bin_dest):
-            print(f"[DEBUG] Copying data.bin → {data_bin_dest}", flush=True)
-            with open(data_bin_src, "rb") as fsrc, open(data_bin_dest, "wb") as fdst:
-                shutil.copyfileobj(fsrc, fdst, length=16 * 1024)
+        _copy_if_incomplete(data_bin_src, data_bin_dest)
 
         # data_chan2.bin (optional)
         data_chan2_src = os.path.join(src_plane_folder, "data_chan2.bin")
         data_chan2_dest = os.path.join(plane_folder, "data_chan2.bin")
-        if os.path.exists(data_chan2_src) and not os.path.exists(data_chan2_dest):
-            print(f"[DEBUG] Copying data_chan2.bin → {data_chan2_dest}", flush=True)
-            with open(data_chan2_src, "rb") as fsrc2, open(data_chan2_dest, "wb") as fdst2:
-                shutil.copyfileobj(fsrc2, fdst2, length=16 * 1024)
-        if not os.path.exists(data_chan2_src):
+        if os.path.exists(data_chan2_src):
+            _copy_if_incomplete(data_chan2_src, data_chan2_dest)
+        else:
             data_chan2_dest = None  # keep your logic
 
         # Suite2p v1 uses settings/config files; legacy runs use ops.npy.
@@ -239,6 +288,7 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
                 print("[DEBUG] extraction_wrapper printed:", flush=True)
                 print(extraction_printed, flush=True)
 
+            check_canceled()
             stat_out, F, Fneu, F_chan2, Fneu_chan2 = outputs
             np.save(os.path.join(plane_folder, "stat.npy"), stat_out)
             np.save(os.path.join(plane_folder, "F.npy"), F)
@@ -246,6 +296,7 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
             np.save(os.path.join(plane_folder, "F_chan2.npy"), F_chan2)
             np.save(os.path.join(plane_folder, "Fneu_chan2.npy"), Fneu_chan2)
 
+        check_canceled()
         # ---- Spike deconvolution ----
         print(f"[DEBUG] Running spike deconvolution for plane {plane}", flush=True)
         dF = F.copy() - ops["neucoeff"] * Fneu
@@ -258,6 +309,7 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
             prctile_baseline=ops["prctile_baseline"],
         )
         spks = oasis(F=dF, batch_size=ops["batch_size"], tau=ops["tau"], fs=ops["fs"])
+        check_canceled()
         np.save(os.path.join(plane_folder, "spks.npy"), spks)
 
         # ---- iscell ----
@@ -265,6 +317,7 @@ def run_extraction(root_folder: str, mode: str, force: bool, log_path: Optional[
         iscell_arr = np.ones((len(roi_ids), 2), dtype=int)
         np.save(os.path.join(plane_folder, "iscell.npy"), iscell_arr)
 
+    check_canceled()
     # ---- Success file ----
     with open(success_file, "w", encoding="utf-8") as sf:
         sf.write("Extraction finished successfully.\n")

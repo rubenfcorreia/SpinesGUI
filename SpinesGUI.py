@@ -1679,7 +1679,6 @@ class MainWindow(QMainWindow):
             return
 
         spines_gui_folder = os.path.join(self.root_folder, "SpinesGUI")
-        os.makedirs(spines_gui_folder, exist_ok=True)
 
         # Decide if re-extraction based on success marker (same as worker)
         success_file = os.path.join(spines_gui_folder, "extraction_successfull.txt")
@@ -1694,6 +1693,27 @@ class MainWindow(QMainWindow):
             if QMessageBox.question(self, "Re-run Extraction", msg, QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
                 return
             force = True
+
+        post_requested = self.post_extraction_checkbox.isChecked()
+        confirmation = (
+            "Save the current ROI definitions and queue extraction?\n\n"
+            f"Mode: {self.mode}\n"
+            f"Post-extraction processing: {'Yes' if post_requested else 'No'}\n\n"
+            "Choose No to leave the files and queue unchanged."
+        )
+        confirmation_box = QMessageBox(self)
+        confirmation_box.setWindowTitle("Confirm ROI Extraction")
+        confirmation_box.setText(confirmation)
+        confirmation_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        force_checkbox = QCheckBox("Force re-extraction (overwrite existing outputs)")
+        force_checkbox.setChecked(force)
+        force_checkbox.setEnabled(not reextract)
+        confirmation_box.setCheckBox(force_checkbox)
+        if confirmation_box.exec_() != QMessageBox.Yes:
+            return
+        force = force_checkbox.isChecked()
+
+        os.makedirs(spines_gui_folder, exist_ok=True)
 
         # Ensure worker has required inputs on disk
         try:
@@ -1720,7 +1740,6 @@ class MainWindow(QMainWindow):
                 post_requested=self.post_extraction_checkbox.isChecked(),
             )
 
-            post_requested = self.post_extraction_checkbox.isChecked()
             print(
                 f"[GUI] queued job_id={job_id} exp_id={exp_id} force={force} "
                 f"post_requested={post_requested}", flush=True,

@@ -127,12 +127,19 @@ switch modes when appropriate.
 
 ## ROI extraction
 
-Click **Extract ROIs** after drawing and saving the ROIs. The GUI does not run
+Click **Extract ROIs** after drawing and saving the ROIs. The GUI first asks
+for confirmation; choosing No leaves the ROI files and queue unchanged. The dialog also
+offers **Force re-extraction**, which overwrites existing extraction outputs. The GUI does not run
 the extraction in the GUI process. It saves the ROI and plane dictionaries,
 then submits a job to the extraction queue.
 
 The worker reads `roi_data.npy` and `plane_data.npy`, uses the Suite2p
 registered binaries and metadata from each plane, and writes outputs under:
+Before extraction, each source `data.bin` and optional `data_chan2.bin` is
+copied into `SpinesGUI/planeX/` only when the destination is missing or its
+file size differs from the source. Copies use a temporary file and atomic
+replacement so interrupted copies are retried safely.
+
 
 ```text
 SpinesGUI/planeX/
@@ -231,14 +238,17 @@ python queue_monitor.py
 
 The monitor refreshes automatically and shows:
 
-- the currently running job;
+- running jobs in a table with their mode, extraction/post status, start time,
+  and cancellation state;
 - queued jobs and their mode/force settings;
 - the four most recently finished jobs;
 - a live tail of the running job log or worker log;
-- cancellation for jobs that are still queued.
+- cancellation for queued jobs and safe cancellation requests for running jobs.
 
-Only queued jobs can be canceled. A running extraction must be allowed to finish
-or be stopped externally.
+Queued jobs cancel immediately. A running extraction uses cooperative cancellation:
+the current Suite2p stage is allowed to finish, then the worker stops at the next
+safe checkpoint and records the job as canceled. Cancellation can leave partial
+outputs from completed stages; rerun extraction to produce a complete output set.
 
 ## Combined Suite2p data and splitting
 
