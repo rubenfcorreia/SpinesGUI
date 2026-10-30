@@ -223,11 +223,15 @@ class QueueMonitorDialog(QDialog):
         text = tail_text(log_path)
         if text:
             # only update if changed; avoids annoying cursor jumps
-            if text != self.txt_log.toPlainText():
+            log_changed = text != self.txt_log.toPlainText()
+            if log_changed:
                 self.txt_log.setPlainText(text)
+            if current_running is None or log_changed:
                 self.txt_log.verticalScrollBar().setValue(self.txt_log.verticalScrollBar().maximum())
         else:
             self.txt_log.setPlainText("(no log output yet)")
+            if current_running is None:
+                self.txt_log.verticalScrollBar().setValue(self.txt_log.verticalScrollBar().maximum())
 
     def cancel_selected(self) -> None:
         queued_rows = [
